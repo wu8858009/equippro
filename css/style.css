@@ -360,6 +360,31 @@ textarea { resize: vertical; font-family: inherit; }
     display: block; position: fixed; inset: 0; z-index: 55; background: rgba(11, 11, 11, 0.45);
   }
   .mini-stat-row { padding: 14px; }
+
+  /* Card view: a scrolling table is cramped on a phone and hides columns
+     off-screen, so each row becomes a labeled card instead. data-label on
+     every <td> (set in app.js) supplies the caption via ::before. */
+  .table-wrap { overflow-x: visible; }
+  .table thead { display: none; }
+  .table, .table tbody, .table tr, .table td { display: block; width: 100%; }
+  .table tr {
+    border: 1px solid var(--border); border-radius: var(--radius-sm);
+    margin: 0 0 12px; overflow: hidden; background: var(--surface-1); box-shadow: var(--shadow-sm);
+  }
+  .table tbody tr:last-child { margin-bottom: 0; }
+  .table td {
+    display: flex; align-items: center; justify-content: space-between; gap: 14px;
+    padding: 10px 14px; border-bottom: 1px solid var(--border); text-align: right; white-space: normal;
+  }
+  .table td:last-child { border-bottom: none; }
+  .table td::before {
+    content: attr(data-label); flex-shrink: 0; text-align: left;
+    font-size: 11px; font-weight: 700; color: var(--text-muted); text-transform: uppercase; letter-spacing: .02em;
+  }
+  .table td.row-actions { justify-content: flex-end; }
+  .table td.row-actions::before { display: none; }
+  .table td.empty-cell { display: block; text-align: center; padding: 24px 14px !important; }
+  .table td.empty-cell::before { display: none; }
 }
 
 /* ---------- print ---------- */

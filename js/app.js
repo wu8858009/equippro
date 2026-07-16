@@ -295,10 +295,10 @@
               <tbody>
                 ${s.upcoming.length ? s.upcoming.map(e => `
                   <tr class="row-link" data-nav="#/equipment/${e.id}">
-                    <td>${esc(e.name)}</td>
-                    <td>${esc(e.department || '—')}</td>
-                    <td class="${e.daysLeft < 0 ? 'text-crit' : e.daysLeft <= 30 ? 'text-warn' : ''}">${e.daysLeft < 0 ? `已逾期 ${Math.abs(e.daysLeft)} 天` : `${e.daysLeft} 天`}</td>
-                    <td>${statusBadge(e.status)}</td>
+                    <td data-label="設備">${esc(e.name)}</td>
+                    <td data-label="部門">${esc(e.department || '—')}</td>
+                    <td data-label="剩餘天數" class="${e.daysLeft < 0 ? 'text-crit' : e.daysLeft <= 30 ? 'text-warn' : ''}">${e.daysLeft < 0 ? `已逾期 ${Math.abs(e.daysLeft)} 天` : `${e.daysLeft} 天`}</td>
+                    <td data-label="狀態">${statusBadge(e.status)}</td>
                   </tr>`).join('') : `<tr><td colspan="4" class="empty-cell">目前沒有需要注意的設備</td></tr>`}
               </tbody>
             </table>
@@ -366,13 +366,13 @@
             <tbody>
               ${filtered.length ? filtered.map(e => `
                 <tr class="row-link" data-nav="#/equipment/${e.id}">
-                  <td class="mono">${esc(e.code)}</td>
-                  <td>${esc(e.name)}</td>
-                  <td>${esc(e.category || '—')}</td>
-                  <td>${esc(e.department || '—')} / ${esc(e.location || '—')}</td>
-                  <td class="mono">${fmtDate(e.purchaseDate)}</td>
-                  <td>${statusBadge(e.status)}</td>
-                  <td class="mono">${fmtMoney(e.purchasePrice)}</td>
+                  <td class="mono" data-label="編號">${esc(e.code)}</td>
+                  <td data-label="名稱">${esc(e.name)}</td>
+                  <td data-label="類別">${esc(e.category || '—')}</td>
+                  <td data-label="部門 / 位置">${esc(e.department || '—')} / ${esc(e.location || '—')}</td>
+                  <td class="mono" data-label="採購日期">${fmtDate(e.purchaseDate)}</td>
+                  <td data-label="狀態">${statusBadge(e.status)}</td>
+                  <td class="mono" data-label="採購金額">${fmtMoney(e.purchasePrice)}</td>
                   <td class="row-actions">
                     <button class="btn btn-sm btn-ghost" data-edit="${e.id}">編輯</button>
                     ${isAdmin ? `<button class="btn btn-sm btn-ghost btn-danger" data-delete="${e.id}">刪除</button>` : ''}
@@ -509,12 +509,12 @@
             <tbody>
               ${replacements.length ? replacements.map(r => `
                 <tr>
-                  <td class="mono">${fmtDate(r.replaceDate)}</td>
-                  <td>${esc(r.reason || '—')}</td>
-                  <td class="mono">${fmtMoney(r.cost)}</td>
-                  <td>${esc(r.vendor || '—')}</td>
-                  <td>${esc(r.operator || '—')}</td>
-                  <td>${EPM.photos.thumbRowHtml(r.photos, r.id)}</td>
+                  <td class="mono" data-label="日期">${fmtDate(r.replaceDate)}</td>
+                  <td data-label="原因">${esc(r.reason || '—')}</td>
+                  <td class="mono" data-label="成本">${fmtMoney(r.cost)}</td>
+                  <td data-label="廠商">${esc(r.vendor || '—')}</td>
+                  <td data-label="經辦人">${esc(r.operator || '—')}</td>
+                  <td data-label="照片">${EPM.photos.thumbRowHtml(r.photos, r.id)}</td>
                   ${isAdmin ? `<td class="row-actions"><button class="btn btn-sm btn-ghost btn-danger" data-del-rep="${r.id}">刪除</button></td>` : ''}
                 </tr>`).join('') : `<tr><td colspan="${isAdmin ? 7 : 6}" class="empty-cell">尚無更換紀錄</td></tr>`}
             </tbody>
@@ -530,13 +530,13 @@
             <tbody>
               ${quotes.length ? quotes.map((q, i) => `
                 <tr class="${q.selected ? 'row-selected' : ''}">
-                  <td>${esc(q.itemName)}</td>
-                  <td>${esc(q.vendor)}</td>
-                  <td class="mono ${i === 0 ? 'text-good' : ''}">${fmtMoney(q.price)}</td>
-                  <td class="mono">${fmtDate(q.quoteDate)}</td>
-                  <td class="mono">${fmtDate(q.validUntil)}</td>
-                  <td>${EPM.photos.thumbRowHtml(q.photos, q.id)}</td>
-                  <td>${q.selected ? '<span class="badge badge-good">已選定</span>' : (isAdmin ? `<button class="btn btn-sm btn-ghost" data-select-quote="${q.id}">選定</button>` : '—')}</td>
+                  <td data-label="項目">${esc(q.itemName)}</td>
+                  <td data-label="廠商">${esc(q.vendor)}</td>
+                  <td class="mono ${i === 0 ? 'text-good' : ''}" data-label="報價">${fmtMoney(q.price)}</td>
+                  <td class="mono" data-label="報價日期">${fmtDate(q.quoteDate)}</td>
+                  <td class="mono" data-label="有效期限">${fmtDate(q.validUntil)}</td>
+                  <td data-label="照片">${EPM.photos.thumbRowHtml(q.photos, q.id)}</td>
+                  <td data-label="狀態">${q.selected ? '<span class="badge badge-good">已選定</span>' : (isAdmin ? `<button class="btn btn-sm btn-ghost" data-select-quote="${q.id}">選定</button>` : '—')}</td>
                   ${isAdmin ? `<td class="row-actions"><button class="btn btn-sm btn-ghost btn-danger" data-del-quote="${q.id}">刪除</button></td>` : ''}
                 </tr>`).join('') : `<tr><td colspan="${isAdmin ? 8 : 7}" class="empty-cell">尚無報價紀錄</td></tr>`}
             </tbody>
@@ -671,13 +671,13 @@
               <tbody>
                 ${g.quotes.map((q, i) => `
                   <tr class="${q.selected ? 'row-selected' : ''}">
-                    <td>${esc(q.vendor)}</td>
-                    <td class="mono ${i === 0 ? 'text-good' : ''}">${fmtMoney(q.price)}</td>
-                    <td class="mono">${fmtDate(q.quoteDate)}</td>
-                    <td class="mono">${fmtDate(q.validUntil)}</td>
-                    <td>${esc(q.contact || '—')}</td>
-                    <td>${EPM.photos.thumbRowHtml(q.photos, q.id)}</td>
-                    <td>${q.selected ? '<span class="badge badge-good">已選定</span>' : (isAdmin ? `<button class="btn btn-sm btn-ghost" data-select-quote="${q.id}">選定</button>` : '—')}</td>
+                    <td data-label="廠商">${esc(q.vendor)}</td>
+                    <td class="mono ${i === 0 ? 'text-good' : ''}" data-label="報價">${fmtMoney(q.price)}</td>
+                    <td class="mono" data-label="報價日期">${fmtDate(q.quoteDate)}</td>
+                    <td class="mono" data-label="有效期限">${fmtDate(q.validUntil)}</td>
+                    <td data-label="聯絡方式">${esc(q.contact || '—')}</td>
+                    <td data-label="照片">${EPM.photos.thumbRowHtml(q.photos, q.id)}</td>
+                    <td data-label="狀態">${q.selected ? '<span class="badge badge-good">已選定</span>' : (isAdmin ? `<button class="btn btn-sm btn-ghost" data-select-quote="${q.id}">選定</button>` : '—')}</td>
                     ${isAdmin ? `<td class="row-actions"><button class="btn btn-sm btn-ghost btn-danger" data-del-quote="${q.id}">刪除</button></td>` : ''}
                   </tr>`).join('')}
               </tbody>
@@ -772,11 +772,11 @@
             <tbody>
               ${users.map(u => `
                 <tr>
-                  <td class="mono">${esc(u.username)}</td>
-                  <td>${esc(u.name)}</td>
-                  <td>${u.role === 'admin' ? '<span class="badge badge-good">管理員</span>' : '<span class="badge badge-muted">一般人員</span>'}</td>
-                  <td>${u.active ? '<span class="badge badge-good">啟用中</span>' : '<span class="badge badge-crit">已停用</span>'}</td>
-                  <td class="mono">${new Date(u.createdAt).toLocaleDateString('zh-TW')}</td>
+                  <td class="mono" data-label="帳號">${esc(u.username)}</td>
+                  <td data-label="姓名">${esc(u.name)}</td>
+                  <td data-label="角色">${u.role === 'admin' ? '<span class="badge badge-good">管理員</span>' : '<span class="badge badge-muted">一般人員</span>'}</td>
+                  <td data-label="狀態">${u.active ? '<span class="badge badge-good">啟用中</span>' : '<span class="badge badge-crit">已停用</span>'}</td>
+                  <td class="mono" data-label="建立時間">${new Date(u.createdAt).toLocaleDateString('zh-TW')}</td>
                   <td class="row-actions">
                     <button class="btn btn-sm btn-ghost" data-edit-user="${u.id}">編輯</button>
                     <button class="btn btn-sm btn-ghost" data-toggle-user="${u.id}">${u.active ? '停用' : '啟用'}</button>
