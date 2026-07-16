@@ -2,3 +2,9 @@
 Thumbs.db
 node_modules/
 *.log
+__pycache__/
+*.pyc
+build/
+dist/
+*.spec
+equippro_data.json

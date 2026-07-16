@@ -21,6 +21,7 @@
       contact: data.contact || '',
       selected: false,
       notes: data.notes || '',
+      photos: Array.isArray(data.photos) ? data.photos : [],
       createdAt: Date.now()
     };
     all.push(q);

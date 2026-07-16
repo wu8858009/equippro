@@ -439,16 +439,20 @@
         </div>
         <label class="field"><span>供應商</span><input type="text" name="supplier" value="${esc(existing?.supplier)}" /></label>
         <label class="field"><span>備註</span><textarea name="notes" rows="2">${esc(existing?.notes)}</textarea></label>
+        <label class="field"><span>設備照片</span><div id="eq-photo-picker"></div></label>
         <div class="modal-footer">
           <button type="button" class="btn btn-ghost" data-close-modal>取消</button>
           <button type="submit" class="btn btn-primary">${isEdit ? '儲存變更' : '新增設備'}</button>
         </div>
       </form>`;
+    const pendingPhotos = (existing?.photos || []).slice();
     openModal(html, {
-      onMount: () => {
+      onMount: (modalEl) => {
+        EPM.photos.mountPicker(modalEl.querySelector('#eq-photo-picker'), pendingPhotos);
         document.getElementById('eq-form').addEventListener('submit', (e) => {
           e.preventDefault();
           const data = Object.fromEntries(new FormData(e.target).entries());
+          data.photos = pendingPhotos;
           if (isEdit) EPM.equipment.update(existing.id, data);
           else EPM.equipment.create(data);
           closeModal();
@@ -488,13 +492,20 @@
           <div><span class="detail-label">供應商</span><span>${esc(eq.supplier || '—')}</span></div>
         </div>
         ${eq.notes ? `<div class="detail-notes"><span class="detail-label">備註</span><p>${esc(eq.notes)}</p></div>` : ''}
+        ${(eq.photos && eq.photos.length) ? `
+          <div class="detail-notes">
+            <span class="detail-label">設備照片</span>
+            <div class="photo-grid photo-grid-view">
+              ${eq.photos.map((src, i) => `<div class="photo-thumb" data-view-eq-photo="${i}"><img src="${src}" alt="設備照片 ${i + 1}" /></div>`).join('')}
+            </div>
+          </div>` : ''}
       </div>
 
       <div class="card">
         <div class="card-header"><h3>更換紀錄</h3><button class="btn btn-sm btn-primary" id="add-replacement-btn">＋ 新增更換紀錄</button></div>
         <div class="table-wrap">
           <table class="table">
-            <thead><tr><th>日期</th><th>原因</th><th>成本</th><th>廠商</th><th>經辦人</th>${isAdmin ? '<th></th>' : ''}</tr></thead>
+            <thead><tr><th>日期</th><th>原因</th><th>成本</th><th>廠商</th><th>經辦人</th><th>照片</th>${isAdmin ? '<th></th>' : ''}</tr></thead>
             <tbody>
               ${replacements.length ? replacements.map(r => `
                 <tr>
@@ -503,8 +514,9 @@
                   <td class="mono">${fmtMoney(r.cost)}</td>
                   <td>${esc(r.vendor || '—')}</td>
                   <td>${esc(r.operator || '—')}</td>
+                  <td>${EPM.photos.thumbRowHtml(r.photos, r.id)}</td>
                   ${isAdmin ? `<td class="row-actions"><button class="btn btn-sm btn-ghost btn-danger" data-del-rep="${r.id}">刪除</button></td>` : ''}
-                </tr>`).join('') : `<tr><td colspan="${isAdmin ? 6 : 5}" class="empty-cell">尚無更換紀錄</td></tr>`}
+                </tr>`).join('') : `<tr><td colspan="${isAdmin ? 7 : 6}" class="empty-cell">尚無更換紀錄</td></tr>`}
             </tbody>
           </table>
         </div>
@@ -514,7 +526,7 @@
         <div class="card-header"><h3>廠商報價</h3><button class="btn btn-sm btn-primary" id="add-quote-btn">＋ 新增報價</button></div>
         <div class="table-wrap">
           <table class="table">
-            <thead><tr><th>項目</th><th>廠商</th><th>報價</th><th>報價日期</th><th>有效期限</th><th>狀態</th>${isAdmin ? '<th></th>' : ''}</tr></thead>
+            <thead><tr><th>項目</th><th>廠商</th><th>報價</th><th>報價日期</th><th>有效期限</th><th>照片</th><th>狀態</th>${isAdmin ? '<th></th>' : ''}</tr></thead>
             <tbody>
               ${quotes.length ? quotes.map((q, i) => `
                 <tr class="${q.selected ? 'row-selected' : ''}">
@@ -523,9 +535,10 @@
                   <td class="mono ${i === 0 ? 'text-good' : ''}">${fmtMoney(q.price)}</td>
                   <td class="mono">${fmtDate(q.quoteDate)}</td>
                   <td class="mono">${fmtDate(q.validUntil)}</td>
+                  <td>${EPM.photos.thumbRowHtml(q.photos, q.id)}</td>
                   <td>${q.selected ? '<span class="badge badge-good">已選定</span>' : (isAdmin ? `<button class="btn btn-sm btn-ghost" data-select-quote="${q.id}">選定</button>` : '—')}</td>
                   ${isAdmin ? `<td class="row-actions"><button class="btn btn-sm btn-ghost btn-danger" data-del-quote="${q.id}">刪除</button></td>` : ''}
-                </tr>`).join('') : `<tr><td colspan="${isAdmin ? 7 : 6}" class="empty-cell">尚無報價紀錄</td></tr>`}
+                </tr>`).join('') : `<tr><td colspan="${isAdmin ? 8 : 7}" class="empty-cell">尚無報價紀錄</td></tr>`}
             </tbody>
           </table>
         </div>
@@ -545,6 +558,14 @@
     root.querySelectorAll('[data-select-quote]').forEach(b => b.addEventListener('click', () => {
       EPM.pricing.selectVendor(b.dataset.selectQuote); toast('已選定廠商'); renderEquipmentDetail(id);
     }));
+    root.querySelectorAll('[data-view-eq-photo]').forEach(el => el.addEventListener('click', () => {
+      EPM.photos.openLightbox(eq.photos, Number(el.dataset.viewEqPhoto));
+    }));
+    root.querySelectorAll('[data-open-photos]').forEach(el => el.addEventListener('click', () => {
+      const rid = el.dataset.openPhotos;
+      const rec = replacements.find(r => r.id === rid) || quotes.find(q => q.id === rid);
+      if (rec) EPM.photos.openLightbox(rec.photos, 0);
+    }));
   }
 
   function openReplacementForm(eq) {
@@ -561,20 +582,24 @@
           <label class="field"><span>舊設備處置</span><input type="text" name="disposal" placeholder="例如：原廠回收" /></label>
         </div>
         <label class="field"><span>備註</span><textarea name="notes" rows="2"></textarea></label>
+        <label class="field"><span>照片</span><div id="rep-photo-picker"></div></label>
         <label class="checkbox-field"><input type="checkbox" name="markRetired" checked /> 同步將此設備狀態標記為「已汰換」</label>
         <div class="modal-footer">
           <button type="button" class="btn btn-ghost" data-close-modal>取消</button>
           <button type="submit" class="btn btn-primary">新增紀錄</button>
         </div>
       </form>`;
+    const pendingPhotos = [];
     openModal(html, {
-      onMount: () => {
+      onMount: (modalEl) => {
+        EPM.photos.mountPicker(modalEl.querySelector('#rep-photo-picker'), pendingPhotos);
         document.getElementById('rep-form').addEventListener('submit', (e) => {
           e.preventDefault();
           const fd = new FormData(e.target);
           const data = Object.fromEntries(fd.entries());
           data.equipmentId = eq.id;
           data.markRetired = fd.get('markRetired') === 'on';
+          data.photos = pendingPhotos;
           EPM.equipment.addReplacement(data);
           closeModal();
           toast('已新增更換紀錄');
@@ -599,17 +624,21 @@
         </div>
         <label class="field"><span>聯絡方式</span><input type="text" name="contact" /></label>
         <label class="field"><span>備註</span><textarea name="notes" rows="2"></textarea></label>
+        <label class="field"><span>報價單／照片</span><div id="quote-photo-picker"></div></label>
         <div class="modal-footer">
           <button type="button" class="btn btn-ghost" data-close-modal>取消</button>
           <button type="submit" class="btn btn-primary">新增報價</button>
         </div>
       </form>`;
+    const pendingPhotos = [];
     openModal(html, {
-      onMount: () => {
+      onMount: (modalEl) => {
+        EPM.photos.mountPicker(modalEl.querySelector('#quote-photo-picker'), pendingPhotos);
         document.getElementById('quote-form').addEventListener('submit', (e) => {
           e.preventDefault();
           const data = Object.fromEntries(new FormData(e.target).entries());
           data.equipmentId = eq.id;
+          data.photos = pendingPhotos;
           EPM.pricing.addQuote(data);
           closeModal();
           toast('已新增報價');
@@ -638,7 +667,7 @@
           </div>
           <div class="table-wrap">
             <table class="table">
-              <thead><tr><th>廠商</th><th>報價</th><th>報價日期</th><th>有效期限</th><th>聯絡方式</th><th>狀態</th>${isAdmin ? '<th></th>' : ''}</tr></thead>
+              <thead><tr><th>廠商</th><th>報價</th><th>報價日期</th><th>有效期限</th><th>聯絡方式</th><th>照片</th><th>狀態</th>${isAdmin ? '<th></th>' : ''}</tr></thead>
               <tbody>
                 ${g.quotes.map((q, i) => `
                   <tr class="${q.selected ? 'row-selected' : ''}">
@@ -647,6 +676,7 @@
                     <td class="mono">${fmtDate(q.quoteDate)}</td>
                     <td class="mono">${fmtDate(q.validUntil)}</td>
                     <td>${esc(q.contact || '—')}</td>
+                    <td>${EPM.photos.thumbRowHtml(q.photos, q.id)}</td>
                     <td>${q.selected ? '<span class="badge badge-good">已選定</span>' : (isAdmin ? `<button class="btn btn-sm btn-ghost" data-select-quote="${q.id}">選定</button>` : '—')}</td>
                     ${isAdmin ? `<td class="row-actions"><button class="btn btn-sm btn-ghost btn-danger" data-del-quote="${q.id}">刪除</button></td>` : ''}
                   </tr>`).join('')}
@@ -663,6 +693,10 @@
       if (eq) openQuoteForm(eq, b.dataset.item);
     }));
     root.querySelectorAll('[data-select-quote]').forEach(b => b.addEventListener('click', () => { EPM.pricing.selectVendor(b.dataset.selectQuote); toast('已選定廠商'); renderPricing(); }));
+    root.querySelectorAll('[data-open-photos]').forEach(el => el.addEventListener('click', () => {
+      const q = EPM.pricing.list().find(q => q.id === el.dataset.openPhotos);
+      if (q) EPM.photos.openLightbox(q.photos, 0);
+    }));
     root.querySelectorAll('[data-del-quote]').forEach(b => b.addEventListener('click', () => {
       if (confirmAction('確定要刪除這筆報價嗎？')) { EPM.pricing.removeQuote(b.dataset.delQuote); toast('已刪除報價'); renderPricing(); }
     }));
@@ -864,12 +898,14 @@
     }
   }
 
-  window.EPM.app = { render, navigate, toast };
+  window.EPM.app = { render, navigate, toast, openModal, closeModal };
 
   /* ---------- boot ---------- */
   document.addEventListener('DOMContentLoaded', () => {
-    EPM.storage.seed();
-    applyTheme();
-    render();
+    EPM.storage.initPersistence().then(() => {
+      EPM.storage.seed();
+      applyTheme();
+      render();
+    });
   });
 })();

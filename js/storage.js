@@ -23,7 +23,96 @@
   }
 
   function write(key, value) {
-    localStorage.setItem(key, JSON.stringify(value));
+    try {
+      localStorage.setItem(key, JSON.stringify(value));
+    } catch (e) {
+      // Most likely QuotaExceededError — base64 photos are the usual culprit.
+      console.error('儲存資料失敗', key, e);
+      if (window.EPM && window.EPM.app && window.EPM.app.toast) {
+        window.EPM.app.toast('儲存失敗：瀏覽器儲存空間已滿，請刪除部分照片或紀錄後再試', 'error');
+      }
+      return false;
+    }
+    persistToDesktop();
+    return true;
+  }
+
+  function remove(key) {
+    localStorage.removeItem(key);
+    persistToDesktop();
+  }
+
+  // ---------- desktop (pywebview) persistence bridge ----------
+  // In the browser, localStorage is the whole story. In the desktop app,
+  // pywebview additionally mirrors every epm_* key into a JSON file next to
+  // the .exe (via desktop_app.py's Api.save_data/load_data), so the data
+  // survives as a visible, backup-able file instead of living only inside
+  // WebView2's hidden profile folder.
+  function isDesktop() {
+    return !!(window.pywebview && window.pywebview.api);
+  }
+
+  function flushToDesktop() {
+    if (!isDesktop()) return;
+    const snapshot = {};
+    Object.keys(localStorage).forEach((k) => {
+      if (k.indexOf(PREFIX) === 0) snapshot[k] = localStorage.getItem(k);
+    });
+    window.pywebview.api.save_data(JSON.stringify(snapshot)).catch((e) => console.error('寫入本機資料檔失敗', e));
+  }
+
+  // seed() and other bulk operations fire several writes back-to-back; each
+  // one calling save_data() immediately would dispatch overlapping async
+  // calls to Python. Debouncing coalesces a burst of writes into one save
+  // of the final state (the temp-file+replace on the Python side makes each
+  // individual save safe regardless, but this avoids the redundant churn).
+  let persistTimer = null;
+  function persistToDesktop() {
+    if (!isDesktop()) return;
+    if (persistTimer) clearTimeout(persistTimer);
+    persistTimer = setTimeout(() => {
+      persistTimer = null;
+      flushToDesktop();
+    }, 150);
+  }
+
+  // Make sure the very last change lands even if the window closes before
+  // the debounce timer fires.
+  window.addEventListener('beforeunload', () => {
+    if (persistTimer) { clearTimeout(persistTimer); persistTimer = null; }
+    flushToDesktop();
+  });
+
+  function loadFromDesktop() {
+    return window.pywebview.api.load_data().then((json) => {
+      try {
+        const data = JSON.parse(json || '{}');
+        Object.keys(data).forEach((k) => localStorage.setItem(k, data[k]));
+      } catch (e) {
+        console.error('讀取本機資料檔失敗', e);
+      }
+    }).catch((e) => console.error('讀取本機資料檔失敗', e));
+  }
+
+  // Resolves once it's safe to read localStorage: immediately in a plain
+  // browser, or after the desktop data file has been loaded into
+  // localStorage when running inside the pywebview desktop app.
+  function initPersistence() {
+    return new Promise((resolve) => {
+      let done = false;
+      function finish() {
+        if (done) return;
+        done = true;
+        if (isDesktop()) loadFromDesktop().then(resolve);
+        else resolve();
+      }
+      if (isDesktop()) { finish(); return; }
+      // pywebview injects window.pywebview and fires this event once its JS
+      // bridge is ready, normally within milliseconds — the timeout is only
+      // a safety net for a plain browser, where the event never fires.
+      window.addEventListener('pywebviewready', finish, { once: true });
+      setTimeout(finish, 200);
+    });
   }
 
   function uid(prefix) {
@@ -81,5 +170,5 @@
   }
 
   window.EPM = window.EPM || {};
-  window.EPM.storage = { KEYS, read, write, uid, simpleHash, seed, iso };
+  window.EPM.storage = { KEYS, read, write, remove, uid, simpleHash, seed, iso, isDesktop, initPersistence };
 })();

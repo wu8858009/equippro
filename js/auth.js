@@ -20,7 +20,7 @@
   function logout() {
     const u = getCurrentUser();
     if (u) logActivity('登出系統', '-', '使用者登出', u);
-    localStorage.removeItem(S.KEYS.session);
+    S.remove(S.KEYS.session);
   }
 
   function getCurrentUser() {

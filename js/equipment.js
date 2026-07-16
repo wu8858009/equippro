@@ -32,6 +32,7 @@
       supplier: data.supplier || '',
       purchasePrice: Number(data.purchasePrice) || 0,
       notes: data.notes || '',
+      photos: Array.isArray(data.photos) ? data.photos : [],
       createdAt: now, updatedAt: now,
       createdBy: user ? user.id : null
     };
@@ -78,6 +79,7 @@
       operator: (user && user.name) || data.operator || '',
       disposal: data.disposal || '',
       notes: data.notes || '',
+      photos: Array.isArray(data.photos) ? data.photos : [],
       createdAt: Date.now()
     };
     all.push(rec);
