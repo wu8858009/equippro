@@ -32,6 +32,9 @@
     const byCategory = {};
     eq.forEach(e => { const c = e.category || '未分類'; byCategory[c] = (byCategory[c] || 0) + 1; });
 
+    const byDepartment = {};
+    eq.forEach(e => { const d = e.department || '未指定'; byDepartment[d] = (byDepartment[d] || 0) + 1; });
+
     const now = Date.now();
     const day = 86400000;
     const upcoming = eq
@@ -43,7 +46,24 @@
       .filter(e => e.daysLeft <= 90)
       .sort((a, b) => a.daysLeft - b.daysLeft);
 
-    return { totalCount: eq.length, totalValue, totalReplaceCost, byStatus, byCategory, upcoming, quoteCount: quotes.length };
+    return { totalCount: eq.length, totalValue, totalReplaceCost, byStatus, byCategory, byDepartment, upcoming, quoteCount: quotes.length };
+  }
+
+  function quoteDecisionSummary() {
+    const groups = EPM.pricing.groupedByItem();
+    const decided = groups.filter(g => g.quotes.some(q => q.selected)).length;
+    return { totalItems: groups.length, decided, pending: groups.length - decided };
+  }
+
+  function userSummary() {
+    const users = EPM.auth.getUsers();
+    return {
+      total: users.length,
+      admin: users.filter(u => u.role === 'admin').length,
+      staff: users.filter(u => u.role === 'staff').length,
+      active: users.filter(u => u.active).length,
+      disabled: users.filter(u => !u.active).length
+    };
   }
 
   function monthlyReplacementCost() {
@@ -105,6 +125,73 @@
           x: { ticks: { color: ink() }, grid: { display: false } },
           y: { beginAtZero: true, ticks: { precision: 0, color: ink() }, grid: { color: grid() } }
         },
+        maintainAspectRatio: false
+      }
+    });
+  }
+
+  function renderDepartmentChart(canvasId) {
+    destroyChart(canvasId);
+    const ctx = document.getElementById(canvasId);
+    if (!ctx) return;
+    const s = summary();
+    const labels = Object.keys(s.byDepartment);
+    if (!labels.length) return;
+    charts[canvasId] = new Chart(ctx, {
+      type: 'bar',
+      data: { labels, datasets: [{ label: '設備數量', data: labels.map(l => s.byDepartment[l]), backgroundColor: PALETTE.green, borderRadius: 4, maxBarThickness: 40 }] },
+      options: {
+        plugins: { legend: { display: false }, tooltip: { callbacks: { label: (c) => `${c.formattedValue} 台` } } },
+        scales: {
+          x: { ticks: { color: ink() }, grid: { display: false } },
+          y: { beginAtZero: true, ticks: { precision: 0, color: ink() }, grid: { color: grid() } }
+        },
+        maintainAspectRatio: false
+      }
+    });
+  }
+
+  function renderQuoteDecisionChart(canvasId) {
+    destroyChart(canvasId);
+    const ctx = document.getElementById(canvasId);
+    if (!ctx) return;
+    const q = quoteDecisionSummary();
+    if (!q.totalItems) return;
+    const present = [];
+    if (q.decided) present.push({ label: '已選定廠商', value: q.decided, color: STATUS_COLOR.active });
+    if (q.pending) present.push({ label: '待決策', value: q.pending, color: STATUS_COLOR.pending });
+    charts[canvasId] = new Chart(ctx, {
+      type: 'doughnut',
+      data: {
+        labels: present.map(p => p.label),
+        datasets: [{ data: present.map(p => p.value), backgroundColor: present.map(p => p.color), borderColor: surface(), borderWidth: 2 }]
+      },
+      options: {
+        plugins: { legend: { position: 'bottom', labels: { color: ink(), padding: 14, usePointStyle: true, font: { size: 12 } } } },
+        cutout: '62%',
+        maintainAspectRatio: false
+      }
+    });
+  }
+
+  function renderUserRoleChart(canvasId) {
+    destroyChart(canvasId);
+    const ctx = document.getElementById(canvasId);
+    if (!ctx) return;
+    const u = userSummary();
+    if (!u.total) return;
+    const present = [];
+    if (u.admin) present.push({ label: '管理員', value: u.admin, color: PALETTE.blue });
+    if (u.staff) present.push({ label: '一般人員', value: u.staff, color: PALETTE.aqua });
+    charts[canvasId] = new Chart(ctx, {
+      type: 'doughnut',
+      data: {
+        labels: present.map(p => p.label),
+        datasets: [{ data: present.map(p => p.value), backgroundColor: present.map(p => p.color), borderColor: surface(), borderWidth: 2 }]
+      },
+      options: {
+        plugins: { legend: { position: 'bottom', labels: { color: ink(), padding: 14, usePointStyle: true, font: { size: 12 } } } },
+        cutout: '62%',
         maintainAspectRatio: false
       }
     });
@@ -220,8 +307,9 @@
 
   window.EPM.reports = {
     PALETTE, CATEGORICAL_ORDER, STATUS_COLOR, STATUS_LABEL,
-    summary, monthlyReplacementCost,
+    summary, monthlyReplacementCost, quoteDecisionSummary, userSummary,
     renderStatusChart, renderCategoryChart, renderCostTrendChart, renderVendorCompareChart,
+    renderDepartmentChart, renderQuoteDecisionChart, renderUserRoleChart,
     exportEquipmentCSV, exportReplacementsCSV, exportQuotesCSV
   };
 })();

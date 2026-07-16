@@ -72,7 +72,8 @@
     { route: 'equipment', label: '設備清單', icon: '🖥️' },
     { route: 'pricing', label: '價格管理', icon: '💰' },
     { route: 'reports', label: '報表分析', icon: '📈' },
-    { route: 'users', label: '使用者管理', icon: '👤', adminOnly: true }
+    { route: 'users', label: '使用者管理', icon: '👤', adminOnly: true },
+    { route: 'features', label: '功能介紹', icon: '✨' }
   ];
 
   function renderShell(route, contentHtml) {
@@ -80,7 +81,8 @@
     const isAdmin = EPM.auth.isAdmin();
     root.innerHTML = `
       <div class="app-shell">
-        <aside class="sidebar">
+        <div class="sidebar-backdrop" id="sidebar-backdrop"></div>
+        <aside class="sidebar" id="sidebar">
           <div class="brand">
             <div class="brand-mark">EP</div>
             <div class="brand-text">
@@ -107,6 +109,7 @@
         </aside>
         <div class="main">
           <header class="topbar">
+            <button class="icon-btn mobile-menu-btn" id="mobile-menu-btn" aria-label="開啟選單">☰</button>
             <div class="topbar-title">${esc(NAV_ITEMS.find(n => n.route === route)?.label || '')}</div>
             <div class="topbar-actions">
               <button class="btn btn-ghost" id="theme-toggle">${themeLabel()}</button>
@@ -118,6 +121,16 @@
     document.getElementById('logout-btn').addEventListener('click', () => {
       EPM.auth.logout();
       navigate('/login');
+    });
+    const sidebar = document.getElementById('sidebar');
+    const backdrop = document.getElementById('sidebar-backdrop');
+    document.getElementById('mobile-menu-btn').addEventListener('click', () => {
+      sidebar.classList.add('open');
+      backdrop.classList.add('open');
+    });
+    backdrop.addEventListener('click', () => {
+      sidebar.classList.remove('open');
+      backdrop.classList.remove('open');
     });
     document.getElementById('theme-toggle').addEventListener('click', cycleTheme);
   }
@@ -205,6 +218,8 @@
   function renderDashboard() {
     const s = EPM.reports.summary();
     const activity = S.read(S.KEYS.activity, []).slice(0, 8);
+    const isAdmin = EPM.auth.isAdmin();
+    const u = EPM.reports.userSummary();
     const html = `
       <div class="stat-grid">
         <div class="stat-card">
@@ -240,10 +255,36 @@
         </div>
       </div>
 
+      <div class="grid-2">
+        <div class="card">
+          <div class="card-header"><h3>部門別設備分布</h3></div>
+          <div class="chart-box"><canvas id="chart-department"></canvas></div>
+        </div>
+        <div class="card">
+          <div class="card-header"><h3>廠商報價決策狀態</h3></div>
+          <div class="chart-box"><canvas id="chart-quote-decision"></canvas></div>
+        </div>
+      </div>
+
       <div class="card">
         <div class="card-header"><h3>更換成本趨勢</h3></div>
         <div class="chart-box chart-box-wide"><canvas id="chart-trend"></canvas></div>
       </div>
+
+      ${isAdmin ? `
+      <div class="card">
+        <div class="card-header"><h3>使用者與權限概況</h3><button class="btn btn-sm btn-ghost" id="goto-users-btn">前往使用者管理</button></div>
+        <div class="grid-2">
+          <div class="mini-stat-row">
+            <div class="mini-stat"><div class="mini-stat-value">${u.total}</div><div class="mini-stat-label">使用者總數</div></div>
+            <div class="mini-stat"><div class="mini-stat-value">${u.admin}</div><div class="mini-stat-label">管理員</div></div>
+            <div class="mini-stat"><div class="mini-stat-value">${u.staff}</div><div class="mini-stat-label">一般人員</div></div>
+            <div class="mini-stat"><div class="mini-stat-value">${u.active}</div><div class="mini-stat-label">啟用中</div></div>
+            <div class="mini-stat"><div class="mini-stat-value">${u.disabled}</div><div class="mini-stat-label">已停用</div></div>
+          </div>
+          <div class="chart-box"><canvas id="chart-user-role"></canvas></div>
+        </div>
+      </div>` : ''}
 
       <div class="grid-2">
         <div class="card">
@@ -278,7 +319,13 @@
     document.querySelectorAll('[data-nav]').forEach(row => row.addEventListener('click', () => navigate(row.dataset.nav.replace('#', ''))));
     EPM.reports.renderStatusChart('chart-status');
     EPM.reports.renderCategoryChart('chart-category');
+    EPM.reports.renderDepartmentChart('chart-department');
+    EPM.reports.renderQuoteDecisionChart('chart-quote-decision');
     EPM.reports.renderCostTrendChart('chart-trend');
+    if (isAdmin) {
+      EPM.reports.renderUserRoleChart('chart-user-role');
+      document.getElementById('goto-users-btn').addEventListener('click', () => navigate('/users'));
+    }
   }
 
   /* ---------- equipment list view ---------- */
@@ -759,6 +806,48 @@
     });
   }
 
+  /* ---------- features overview view ---------- */
+  const FEATURE_GROUPS = [
+    {
+      title: '核心功能',
+      items: [
+        { icon: '📊', name: '儀表板總覽', desc: '即時掌握總設備數、總資產價值、待汰換提醒與累計更換成本，並以圖表呈現狀態分布、類別統計與成本趨勢。' },
+        { icon: '🖥️', name: '設備清單與更換紀錄', desc: '新增、編輯、刪除設備資料，記錄採購日期、保固期間、使用年限；每台設備可查詢完整的更換歷史。' },
+        { icon: '💰', name: '價格管理與報價比較', desc: '依項目分組管理多家廠商報價，自動標示最低價，可選定合作廠商並保留完整報價歷程與聯絡資訊。' },
+        { icon: '📈', name: '統計報表與圖表分析', desc: '狀態分布、類別數量、成本趨勢、廠商比價共四種圖表，並可匯出 CSV 或直接列印報表。' },
+        { icon: '👤', name: '多使用者權限管理', desc: '管理員／一般人員角色區隔：管理員可管理帳號、刪除資料；一般人員可查看與新增，但無法刪除或管理使用者。' }
+      ]
+    },
+    {
+      title: '進階特色',
+      items: [
+        { icon: '⏰', name: '待汰換提醒', desc: '依採購日期與預期使用年限自動計算，90 天內到期或已逾期的設備會自動列在儀表板中提醒。' },
+        { icon: '📝', name: '操作稽核紀錄', desc: '記錄誰在何時新增、編輯或刪除了哪些資料，方便追蹤異動與稽核。' },
+        { icon: '📤', name: '資料匯出', desc: '設備清單、更換紀錄、報價紀錄皆可一鍵匯出為相容 Excel 的 CSV 檔案。' },
+        { icon: '🌓', name: '深色／淺色主題', desc: '可切換自動、亮色、暗色三種顯示模式，符合不同使用情境與個人偏好。' },
+        { icon: '🔐', name: '首次設定精靈', desc: '系統不內建預設帳密，首次啟動會引導建立專屬的管理員帳號，降低憑證外洩風險。' },
+        { icon: '💾', name: '免安裝、免伺服器', desc: '純前端網頁應用，資料儲存在瀏覽器本機；可直接開啟使用，也能部署到任何網頁伺服器或 GitHub Pages。' }
+      ]
+    }
+  ];
+
+  function renderFeatures() {
+    const html = `
+      ${FEATURE_GROUPS.map(group => `
+        <div class="card">
+          <div class="card-header"><h3>${esc(group.title)}</h3></div>
+          <div class="feature-grid">
+            ${group.items.map(f => `
+              <div class="feature-card">
+                <div class="feature-icon">${f.icon}</div>
+                <div class="feature-name">${esc(f.name)}</div>
+                <div class="feature-desc">${esc(f.desc)}</div>
+              </div>`).join('')}
+          </div>
+        </div>`).join('')}`;
+    renderShell('features', html);
+  }
+
   /* ---------- main render dispatch ---------- */
   function render() {
     if (!EPM.auth.hasUsers()) { renderSetup(); return; }
@@ -770,6 +859,7 @@
       case 'pricing': renderPricing(); break;
       case 'reports': renderReports(); break;
       case 'users': renderUsers(); break;
+      case 'features': renderFeatures(); break;
       case 'dashboard': default: renderDashboard(); break;
     }
   }

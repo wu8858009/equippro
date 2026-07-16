@@ -100,7 +100,7 @@ body {
 }
 a { color: inherit; text-decoration: none; }
 button { font-family: inherit; }
-.mono { font-variant-numeric: tabular-nums; }
+.mono { font-variant-numeric: tabular-nums; white-space: nowrap; }
 .muted { color: var(--text-muted); }
 
 /* ---------- layout shell ---------- */
@@ -152,9 +152,11 @@ button { font-family: inherit; }
   padding: 0 28px; border-bottom: 1px solid var(--border); background: var(--surface-1);
   position: sticky; top: 0; z-index: 5;
 }
-.topbar-title { font-size: 16px; font-weight: 700; }
+.topbar-title { font-size: 16px; font-weight: 700; flex: 1; }
 .topbar-actions { display: flex; gap: 10px; }
 .content { padding: 24px 28px 48px; flex: 1; display: flex; flex-direction: column; gap: 20px; }
+.mobile-menu-btn { display: none; font-size: 18px; margin-right: 4px; }
+.sidebar-backdrop { display: none; }
 
 /* ---------- buttons ---------- */
 .btn {
@@ -213,6 +215,20 @@ textarea { resize: vertical; font-family: inherit; }
 
 /* ---------- grids ---------- */
 .grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; }
+
+/* ---------- mini stats (dashboard admin overview) ---------- */
+.mini-stat-row { display: flex; flex-wrap: wrap; gap: 14px; padding: 18px 20px; align-content: flex-start; }
+.mini-stat { min-width: 84px; }
+.mini-stat-value { font-size: 22px; font-weight: 800; font-variant-numeric: tabular-nums; }
+.mini-stat-label { font-size: 11.5px; color: var(--text-muted); margin-top: 2px; }
+
+/* ---------- feature cards ---------- */
+.feature-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 16px; padding: 18px 20px; }
+.feature-card { background: var(--page-plane); border: 1px solid var(--border); border-radius: var(--radius-sm); padding: 16px; }
+.feature-icon { font-size: 22px; margin-bottom: 8px; }
+.feature-name { font-size: 13.5px; font-weight: 700; margin-bottom: 4px; }
+.feature-desc { font-size: 12px; color: var(--text-secondary); line-height: 1.6; }
+@media (max-width: 980px) { .feature-grid { grid-template-columns: 1fr; } }
 
 /* ---------- charts ---------- */
 .chart-box { padding: 16px 20px 20px; height: 260px; position: relative; }
@@ -294,6 +310,22 @@ textarea { resize: vertical; font-family: inherit; }
   .stat-grid { grid-template-columns: 1fr; }
   .content { padding: 18px 14px 40px; }
   .topbar { padding: 0 16px; }
+
+  /* Off-canvas nav drawer: a fixed icon rail wastes too much of a phone's
+     width, so below 600px the sidebar becomes a full slide-in drawer instead. */
+  .mobile-menu-btn { display: inline-flex; }
+  .sidebar {
+    position: fixed; top: 0; left: 0; bottom: 0; z-index: 60;
+    width: 240px; transform: translateX(-100%); transition: transform .2s ease;
+    box-shadow: var(--shadow-lg);
+  }
+  .sidebar.open { transform: translateX(0); }
+  .sidebar .brand-text, .sidebar .user-meta, .sidebar .nav-item span:not(.nav-icon) { display: block; }
+  .sidebar .brand, .sidebar .nav-item { justify-content: flex-start; }
+  .sidebar-backdrop.open {
+    display: block; position: fixed; inset: 0; z-index: 55; background: rgba(11, 11, 11, 0.45);
+  }
+  .mini-stat-row { padding: 14px; }
 }
 
 /* ---------- print ---------- */
