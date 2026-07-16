@@ -77,6 +77,7 @@ def main():
         min_size=(960, 600),
         text_select=True,
         js_api=Api(),
+        maximized=True,  # auto-fit the current screen on launch; user can still un-maximize
     )
     webview.start()
 
