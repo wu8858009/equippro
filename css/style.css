@@ -341,9 +341,24 @@ textarea { resize: vertical; font-family: inherit; }
   .form-row { grid-template-columns: 1fr; }
 }
 @media (max-width: 600px) {
-  .stat-grid { grid-template-columns: 1fr; }
   .content { padding: 18px 14px 40px; }
   .topbar { padding: 0 16px; }
+
+  /* Dashboard: denser 2-up stat tiles instead of a tall single column, and
+     re-priority the sections for a quick phone glance — what needs action
+     (alerts, activity) before the decorative charts, admin stats last. */
+  .stat-grid { grid-template-columns: repeat(2, 1fr); gap: 10px; }
+  .stat-card { padding: 14px 14px; }
+  .stat-value { font-size: 21px; }
+  .content > .dash-section { order: 9; }
+  .content > .dash-stats { order: 1; }
+  .content > .dash-lists { order: 2; }
+  .content > .dash-charts-1 { order: 3; }
+  .content > .dash-charts-2 { order: 4; }
+  .content > .dash-trend { order: 5; }
+  .content > .dash-admin { order: 6; }
+  .chart-box { height: 220px; }
+  .chart-box-wide { height: 240px; }
 
   /* Off-canvas nav drawer: a fixed icon rail wastes too much of a phone's
      width, so below 600px the sidebar becomes a full slide-in drawer instead. */

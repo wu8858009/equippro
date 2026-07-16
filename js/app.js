@@ -221,7 +221,7 @@
     const isAdmin = EPM.auth.isAdmin();
     const u = EPM.reports.userSummary();
     const html = `
-      <div class="stat-grid">
+      <div class="stat-grid dash-section dash-stats">
         <div class="stat-card">
           <div class="stat-label">總設備數</div>
           <div class="stat-value">${s.totalCount}</div>
@@ -244,7 +244,7 @@
         </div>
       </div>
 
-      <div class="grid-2">
+      <div class="grid-2 dash-section dash-charts-1">
         <div class="card">
           <div class="card-header"><h3>設備狀態分布</h3></div>
           <div class="chart-box"><canvas id="chart-status"></canvas></div>
@@ -255,7 +255,7 @@
         </div>
       </div>
 
-      <div class="grid-2">
+      <div class="grid-2 dash-section dash-charts-2">
         <div class="card">
           <div class="card-header"><h3>部門別設備分布</h3></div>
           <div class="chart-box"><canvas id="chart-department"></canvas></div>
@@ -266,13 +266,13 @@
         </div>
       </div>
 
-      <div class="card">
+      <div class="card dash-section dash-trend">
         <div class="card-header"><h3>更換成本趨勢</h3></div>
         <div class="chart-box chart-box-wide"><canvas id="chart-trend"></canvas></div>
       </div>
 
       ${isAdmin ? `
-      <div class="card">
+      <div class="card dash-section dash-admin">
         <div class="card-header"><h3>使用者與權限概況</h3><button class="btn btn-sm btn-ghost" id="goto-users-btn">前往使用者管理</button></div>
         <div class="grid-2">
           <div class="mini-stat-row">
@@ -286,7 +286,7 @@
         </div>
       </div>` : ''}
 
-      <div class="grid-2">
+      <div class="grid-2 dash-section dash-lists">
         <div class="card">
           <div class="card-header"><h3>待汰換設備</h3></div>
           <div class="table-wrap">
