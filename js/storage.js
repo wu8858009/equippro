@@ -9,6 +9,8 @@
     quotes: PREFIX + 'quotes',
     activity: PREFIX + 'activity',
     theme: PREFIX + 'theme',
+    dashboardLayout: PREFIX + 'dashboard_layout',
+    equipmentColumns: PREFIX + 'equipment_columns',
     seeded: PREFIX + 'seeded_v1'
   };
 

@@ -4,9 +4,9 @@ Wraps the existing web app (index.html + css/js) in a native desktop
 window using pywebview, so the same code that runs on GitHub Pages also
 runs as a Windows desktop app. Unlike the browser version — where data
 lives only inside the browser's hidden local storage — this launcher also
-mirrors the app's data into a plain JSON file next to the .exe, so it's
-visible, portable, and safe to back up. The desktop app and a browser tab
-still don't share data with each other.
+mirrors the app's data into a plain JSON file, so it's visible, portable,
+and safe to back up. The desktop app and a browser tab still don't share
+data with each other.
 
 Setup (once):
     pip install pywebview
@@ -15,6 +15,7 @@ Run:
     python desktop_app.py
 """
 import os
+import shutil
 import sys
 import webview
 
@@ -23,14 +24,32 @@ import webview
 RESOURCE_DIR = getattr(sys, "_MEIPASS", os.path.dirname(os.path.abspath(__file__)))
 INDEX_PATH = os.path.join(RESOURCE_DIR, "index.html")
 
-# The data file, on the other hand, must live next to the actual .exe (not
-# the temporary _MEIPASS extraction folder, which gets wiped between runs)
-# so it persists across restarts and is easy for the user to find or back up.
+# The data file lives in the user's per-user AppData folder rather than next
+# to the .exe, so it survives no matter how a new release is installed —
+# overwriting the same .exe in place, or unzipping a fresh copy into a brand
+# new folder. (Falls back to the script/exe folder if APPDATA isn't set,
+# e.g. on non-Windows.)
 if getattr(sys, "frozen", False):
-    DATA_DIR = os.path.dirname(os.path.abspath(sys.executable))
+    _LEGACY_DIR = os.path.dirname(os.path.abspath(sys.executable))
 else:
-    DATA_DIR = os.path.dirname(os.path.abspath(__file__))
+    _LEGACY_DIR = os.path.dirname(os.path.abspath(__file__))
+DATA_DIR = os.path.join(os.environ.get("APPDATA", _LEGACY_DIR), "EquipPro")
 DATA_PATH = os.path.join(DATA_DIR, "equippro_data.json")
+_LEGACY_DATA_PATH = os.path.join(_LEGACY_DIR, "equippro_data.json")
+
+
+def _migrate_legacy_data():
+    """One-time move of data from the old next-to-the-exe location, so
+    users upgrading from an earlier version don't lose their existing
+    records when this launcher switches to the AppData location."""
+    if os.path.exists(DATA_PATH) or not os.path.exists(_LEGACY_DATA_PATH):
+        return
+    try:
+        os.makedirs(DATA_DIR, exist_ok=True)
+        shutil.copy2(_LEGACY_DATA_PATH, DATA_PATH)
+    except OSError as e:
+        print(f"[警告] 搬移舊資料檔失敗：{e}")
+
 
 WINDOW_TITLE = "EquipPro — 企業級設備更換紀錄與價位管理系統"
 
@@ -55,6 +74,7 @@ class Api:
         # write either fully lands or doesn't touch the file at all.
         tmp_path = DATA_PATH + ".tmp"
         try:
+            os.makedirs(DATA_DIR, exist_ok=True)
             with open(tmp_path, "w", encoding="utf-8") as f:
                 f.write(data_json)
             os.replace(tmp_path, DATA_PATH)
@@ -65,6 +85,8 @@ class Api:
 
 
 def main():
+    _migrate_legacy_data()
+
     if not os.path.exists(INDEX_PATH):
         print(f"[錯誤] 找不到 index.html：{INDEX_PATH}")
         sys.exit(1)
