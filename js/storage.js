@@ -11,8 +11,28 @@
     theme: PREFIX + 'theme',
     dashboardLayout: PREFIX + 'dashboard_layout',
     equipmentColumns: PREFIX + 'equipment_columns',
+    reminderDismissed: PREFIX + 'reminder_dismissed',
+    maintenancePlans: PREFIX + 'maintenance_plans',
+    maintenanceLogs: PREFIX + 'maintenance_logs',
+    settings: PREFIX + 'settings',
+    syncConfig: PREFIX + 'sync_config',
+    syncMeta: PREFIX + 'sync_meta',
     seeded: PREFIX + 'seeded_v1'
   };
+
+  // Collections that are shared through cloud sync (see js/sync.js). Every
+  // other key (session, theme, layouts, sync bookkeeping) stays per-device.
+  const SYNCED = {
+    users: KEYS.users,
+    equipment: KEYS.equipment,
+    replacements: KEYS.replacements,
+    quotes: KEYS.quotes,
+    activity: KEYS.activity,
+    maintenancePlans: KEYS.maintenancePlans,
+    maintenanceLogs: KEYS.maintenanceLogs
+  };
+  const SYNCED_BY_KEY = {};
+  Object.keys(SYNCED).forEach((c) => { SYNCED_BY_KEY[SYNCED[c]] = c; });
 
   function read(key, fallback) {
     try {
@@ -24,7 +44,11 @@
     }
   }
 
-  function write(key, value) {
+  // opts.fromSync: the write applies data pulled from the cloud, so it must
+  // not be queued for upload again.
+  function write(key, value, opts) {
+    const collection = SYNCED_BY_KEY[key];
+    const oldRaw = collection ? localStorage.getItem(key) : null;
     try {
       localStorage.setItem(key, JSON.stringify(value));
     } catch (e) {
@@ -34,6 +58,9 @@
         window.EPM.app.toast('儲存失敗：瀏覽器儲存空間已滿，請刪除部分照片或紀錄後再試', 'error');
       }
       return false;
+    }
+    if (collection && !(opts && opts.fromSync) && window.EPM && window.EPM.sync) {
+      window.EPM.sync.onLocalWrite(collection, oldRaw, value);
     }
     persistToDesktop();
     return true;
@@ -172,5 +199,5 @@
   }
 
   window.EPM = window.EPM || {};
-  window.EPM.storage = { KEYS, read, write, remove, uid, simpleHash, seed, iso, isDesktop, initPersistence };
+  window.EPM.storage = { KEYS, SYNCED, read, write, remove, uid, simpleHash, seed, iso, isDesktop, initPersistence };
 })();

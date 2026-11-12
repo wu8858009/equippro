@@ -8,6 +8,7 @@
   // (dashboard, users, features) are never module-gated.
   const MODULES = [
     { key: 'equipment', label: '設備清單' },
+    { key: 'maintenance', label: '保養維修' },
     { key: 'pricing', label: '價格管理' },
     { key: 'reports', label: '報表分析' }
   ];
@@ -26,6 +27,9 @@
     if (!user) return false;
     if (user.role === 'admin') return true;
     const modules = Array.isArray(user.modules) ? user.modules : DEFAULT_MODULES;
+    // Accounts saved before the 保養維修 module existed (no modulesV2 flag)
+    // inherit it from their 設備清單 access instead of silently losing it.
+    if (moduleKey === 'maintenance' && !user.modulesV2) return modules.includes('equipment');
     return modules.includes(moduleKey);
   }
 
@@ -84,7 +88,7 @@
     const user = {
       id: S.uid('u'), username, passwordHash: S.simpleHash(password),
       name: (name || '').trim() || username, role: role === 'admin' ? 'admin' : 'staff',
-      modules: Array.isArray(modules) ? modules : DEFAULT_MODULES.slice(),
+      modules: Array.isArray(modules) ? modules : DEFAULT_MODULES.slice(), modulesV2: true,
       active: true, createdAt: Date.now(),
       lastLoginAt: null, failedAttempts: 0, lockedUntil: null
     };
@@ -99,6 +103,7 @@
     const idx = users.findIndex(u => u.id === id);
     if (idx === -1) return { ok: false, message: '找不到使用者' };
     patch = { ...patch };
+    if (Array.isArray(patch.modules)) patch.modulesV2 = true;
     if (patch.password) {
       patch.passwordHash = S.simpleHash(patch.password);
       delete patch.password;

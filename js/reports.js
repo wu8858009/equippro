@@ -583,6 +583,6 @@
     renderStatusChart, renderCategoryChart, renderCostTrendChart, renderVendorCompareChart,
     renderDepartmentChart, renderQuoteDecisionChart, renderUserRoleChart,
     renderDepreciationChart, renderReplacementTimelineChart, renderVendorSpendChart, renderWarrantyChart,
-    exportEquipmentCSV, exportReplacementsCSV, exportQuotesCSV, exportUsersCSV
+    exportEquipmentCSV, exportReplacementsCSV, exportQuotesCSV, exportUsersCSV, toCSV, downloadCSV
   };
 })();

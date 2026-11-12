@@ -58,6 +58,7 @@
     saveList(items.filter(e => e.id !== id));
     removeReplacementsByEquipment(id);
     if (window.EPM.pricing) window.EPM.pricing.removeQuotesByEquipment(id);
+    if (window.EPM.maintenance) window.EPM.maintenance.removeByEquipment(id);
     if (target) EPM.auth.logActivity('刪除設備', target.name, target.code);
   }
 

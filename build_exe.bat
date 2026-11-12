@@ -23,9 +23,12 @@ if errorlevel 1 (
     exit /b 1
 )
 
+set "APP_NAME=設備紀錄軟體"
+
 echo.
 echo 正在打包成 EXE（可能需要一兩分鐘）...
-python -m PyInstaller --noconfirm --name EquipPro --onefile --windowed ^
+python -m PyInstaller --noconfirm --name "%APP_NAME%" --onefile --windowed ^
+    --icon "assets\icon.ico" ^
     --add-data "index.html;." ^
     --add-data "css;css" ^
     --add-data "js;js" ^
@@ -41,7 +44,7 @@ if errorlevel 1 (
 echo.
 echo ============================================
 echo   打包完成！
-echo   執行檔位置：dist\EquipPro.exe
+echo   執行檔位置：dist\%APP_NAME%.exe
 echo ============================================
 echo.
 pause

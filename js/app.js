@@ -36,7 +36,129 @@
     modalRoot.querySelector('.modal-backdrop').addEventListener('click', (e) => { if (e.target.classList.contains('modal-backdrop')) closeModal(); });
     if (opts && opts.onMount) opts.onMount(modalRoot);
   }
-  function closeModal() { modalRoot.classList.remove('open'); modalRoot.innerHTML = ''; }
+  function closeModal() {
+    modalRoot.classList.remove('open');
+    modalRoot.innerHTML = '';
+    if (pendingRemoteRender) { pendingRemoteRender = false; render(); }
+  }
+  function modalOpen() { return modalRoot.classList.contains('open'); }
+
+  /* ---------- cloud sync hooks ---------- */
+  // Data pulled from the cloud re-renders the current page, unless a modal
+  // (usually a half-filled form) is open or the user is typing — then the
+  // refresh waits until it is safe.
+  let pendingRemoteRender = false;
+  function userIsTyping() {
+    const active = document.activeElement;
+    return !!(active && active.matches && active.matches('input:not([type=checkbox]):not([type=radio]), textarea, select'));
+  }
+  function onRemoteChange() {
+    if (modalOpen() || userIsTyping()) { pendingRemoteRender = true; return; }
+    render();
+  }
+  function syncChipHtml() {
+    const st = EPM.sync.state;
+    if (st.status === 'off') return '';
+    const pending = EPM.sync.pendingCount();
+    const map = {
+      idle: ['☁️', pending ? `待上傳 ${pending}` : '已同步', ''],
+      syncing: ['🔄', '同步中…', ''],
+      offline: ['📴', '離線', 'sync-chip-warn'],
+      error: ['⚠️', '同步失敗', 'sync-chip-crit']
+    };
+    const [icon, label, cls] = map[st.status] || map.idle;
+    const title = st.message || (st.lastSync ? '上次同步：' + new Date(st.lastSync).toLocaleString('zh-TW') + '（點一下立即同步）' : '');
+    return `<span class="sync-chip ${cls}" title="${esc(title)}">${icon} ${esc(label)}</span>`;
+  }
+  function updateSyncChip() {
+    const el = document.getElementById('sync-chip');
+    if (el) el.innerHTML = syncChipHtml();
+    if (pendingRemoteRender && !modalOpen() && !userIsTyping() && EPM.sync.state.status === 'idle') {
+      pendingRemoteRender = false;
+      render();
+    }
+  }
+
+  /* ---------- due-date reminder popups (separate windows for lifespan vs. warranty) ---------- */
+  let reminderCheckedThisSession = false;
+  function checkDueReminders() {
+    if (reminderCheckedThisSession) return;
+    const user = EPM.auth.getCurrentUser();
+    if (!user) return;
+    reminderCheckedThisSession = true;
+
+    const today = new Date().toISOString().slice(0, 10);
+    const dismissed = S.read(S.KEYS.reminderDismissed, {});
+    const userDismissed = dismissed[user.id] || {};
+
+    const dueEquipment = EPM.reports.summary().upcoming.filter(e => e.tier === 'overdue' || e.tier === 't30');
+    const dueWarranty = EPM.reports.warrantyAnalysis().items.filter(e => e.daysLeft <= 30);
+    const dueMaintenance = EPM.auth.hasModuleAccess('maintenance')
+      ? EPM.maintenance.dueSoon().map(p => {
+        const eq = EPM.equipment.get(p.equipmentId);
+        return { name: (eq ? eq.name : '') + ' · ' + p.title, daysLeft: p.daysLeft };
+      })
+      : [];
+
+    const queue = [];
+    if (dueEquipment.length && userDismissed.equipment !== today) {
+      queue.push({
+        type: 'equipment', title: '⏰ 待汰換提醒',
+        heading: `即將汰換／已逾期設備（${dueEquipment.length}）`,
+        items: dueEquipment, overdueLabel: '已逾期', soonLabel: '剩餘'
+      });
+    }
+    if (dueWarranty.length && userDismissed.warranty !== today) {
+      queue.push({
+        type: 'warranty', title: '🛡️ 保固到期提醒',
+        heading: `保固即將到期／已過保固設備（${dueWarranty.length}）`,
+        items: dueWarranty, overdueLabel: '已過保固', soonLabel: '保固剩餘'
+      });
+    }
+    if (dueMaintenance.length && userDismissed.maintenance !== today) {
+      queue.push({
+        type: 'maintenance', title: '🔧 保養到期提醒',
+        heading: `即將到期／已逾期的保養（${dueMaintenance.length}）`,
+        items: dueMaintenance, overdueLabel: '已逾期', soonLabel: '剩餘'
+      });
+    }
+    showReminderQueue(queue);
+  }
+
+  function showReminderQueue(queue) {
+    if (!queue.length) return;
+    const current = queue[0];
+    const rest = queue.slice(1);
+    const row = (e) => `
+      <li class="${e.daysLeft < 0 ? 'text-crit' : 'text-warn'}">
+        <span>${esc(e.name)}</span>
+        <span>${e.daysLeft < 0 ? `${current.overdueLabel} ${Math.abs(e.daysLeft)} 天` : e.daysLeft === 0 ? '今天到期' : `${current.soonLabel} ${e.daysLeft} 天`}</span>
+      </li>`;
+    const html = `
+      <div class="modal-header"><h3>${current.title}</h3><button type="button" class="icon-btn" data-next>✕</button></div>
+      <div class="modal-body reminder-modal">
+        <h4>${current.heading}</h4>
+        <ul class="reminder-list">${current.items.slice(0, 10).map(row).join('')}</ul>
+      </div>
+      <div class="modal-footer">
+        <button type="button" class="btn btn-ghost" data-dismiss-today>今天不再提醒</button>
+        <button type="button" class="btn btn-primary" data-next>知道了</button>
+      </div>`;
+    const advance = () => { closeModal(); showReminderQueue(rest); };
+    openModal(html, {
+      onMount: (m) => {
+        m.querySelectorAll('[data-next]').forEach(b => b.addEventListener('click', advance));
+        m.querySelector('[data-dismiss-today]').addEventListener('click', () => {
+          const user = EPM.auth.getCurrentUser();
+          const d = S.read(S.KEYS.reminderDismissed, {});
+          d[user.id] = d[user.id] || {};
+          d[user.id][current.type] = new Date().toISOString().slice(0, 10);
+          S.write(S.KEYS.reminderDismissed, d);
+          advance();
+        });
+      }
+    });
+  }
 
   /* ---------- theme ---------- */
   function applyTheme() {
@@ -70,9 +192,11 @@
   const NAV_ITEMS = [
     { route: 'dashboard', label: '儀表板', icon: '📊' },
     { route: 'equipment', label: '設備清單', icon: '🖥️' },
+    { route: 'maintenance', label: '保養維修', icon: '🔧' },
     { route: 'pricing', label: '價格管理', icon: '💰' },
     { route: 'reports', label: '報表分析', icon: '📈' },
     { route: 'users', label: '使用者管理', icon: '👤', adminOnly: true },
+    { route: 'settings', label: '系統設定', icon: '⚙️', adminOnly: true },
     { route: 'features', label: '功能介紹', icon: '✨' }
   ];
 
@@ -112,6 +236,7 @@
             <button class="icon-btn mobile-menu-btn" id="mobile-menu-btn" aria-label="開啟選單">☰</button>
             <div class="topbar-title">${esc(NAV_ITEMS.find(n => n.route === route)?.label || '')}</div>
             <div class="topbar-actions">
+              <button type="button" class="sync-chip-btn" id="sync-chip">${syncChipHtml()}</button>
               <button class="btn btn-ghost" id="theme-toggle">${themeLabel()}</button>
             </div>
           </header>
@@ -133,6 +258,7 @@
       backdrop.classList.remove('open');
     });
     document.getElementById('theme-toggle').addEventListener('click', cycleTheme);
+    document.getElementById('sync-chip').addEventListener('click', () => { if (EPM.sync.isEnabled()) EPM.sync.syncNow(); });
   }
 
   /* ---------- login view ---------- */
@@ -157,15 +283,37 @@
             ${message ? `<div class="form-error">${esc(message)}</div>` : ''}
             <button type="submit" class="btn btn-primary btn-block">登入</button>
           </form>
+          <div class="login-cloud">
+            ${EPM.sync.isEnabled() ? `<span class="muted">☁️ 已連線雲端同步</span>` : `<button type="button" class="btn btn-ghost btn-sm" id="login-cloud-btn">☁️ 連線雲端同步（新裝置）</button>`}
+          </div>
         </div>
       </div>`;
     document.getElementById('login-form').addEventListener('submit', (e) => {
       e.preventDefault();
       const fd = new FormData(e.target);
       const result = EPM.auth.login(fd.get('username'), fd.get('password'));
-      if (result.ok) { navigate('/dashboard'); }
+      if (result.ok) { goAfterLogin(); checkDueReminders(); }
       else { renderLogin(result.message); }
     });
+    const cloudBtn = document.getElementById('login-cloud-btn');
+    if (cloudBtn) cloudBtn.addEventListener('click', () => openCloudConnectModal('replace'));
+  }
+
+  // A deep link (e.g. a scanned QR label) opened while logged out is
+  // remembered and resumed after login.
+  const AFTER_LOGIN_KEY = 'epm_after_login';
+  function rememberTarget() {
+    const h = location.hash || '';
+    if (/^#\/?(qr|equipment|maintenance)\//.test(h)) {
+      try { sessionStorage.setItem(AFTER_LOGIN_KEY, h); } catch (e) { /* ignore */ }
+    }
+  }
+  function goAfterLogin() {
+    let target = '';
+    try { target = sessionStorage.getItem(AFTER_LOGIN_KEY) || ''; sessionStorage.removeItem(AFTER_LOGIN_KEY); } catch (e) { /* ignore */ }
+    if (target && target !== location.hash) { location.hash = target; return; }
+    if (target) { render(); return; }
+    if (location.hash === '#/dashboard') render(); else navigate('/dashboard');
   }
 
   /* ---------- first-run setup view (create the first admin account) ---------- */
@@ -199,6 +347,10 @@
             ${message ? `<div class="form-error">${esc(message)}</div>` : ''}
             <button type="submit" class="btn btn-primary btn-block">建立管理員帳號並登入</button>
           </form>
+          <div class="login-cloud">
+            <span class="muted">其他電腦或手機已在使用？</span>
+            <button type="button" class="btn btn-ghost btn-sm" id="setup-cloud-btn">☁️ 連線雲端，使用既有帳號</button>
+          </div>
         </div>
       </div>`;
     document.getElementById('setup-form').addEventListener('submit', (e) => {
@@ -210,14 +362,16 @@
       const result = EPM.auth.createUser({ username, password, name: fd.get('name'), role: 'admin' });
       if (!result.ok) { renderSetup(result.message); return; }
       const login = EPM.auth.login(username, password);
-      if (login.ok) navigate('/dashboard'); else renderLogin();
+      if (login.ok) { goAfterLogin(); checkDueReminders(); } else renderLogin();
     });
+    document.getElementById('setup-cloud-btn').addEventListener('click', () => openCloudConnectModal('replace'));
   }
 
   /* ---------- dashboard view ---------- */
   const DASHBOARD_SECTIONS = [
     { id: 'stats', label: '統計總覽', adminOnly: false },
     { id: 'alerts', label: '分級到期預警', adminOnly: false },
+    { id: 'maintenance', label: '保養維修提醒', adminOnly: false },
     { id: 'depreciation', label: '資產折舊與淨值', adminOnly: false },
     { id: 'timeline', label: '汰換規劃時間軸', adminOnly: false },
     { id: 'charts1', label: '狀態與類別分布', adminOnly: false },
@@ -309,6 +463,8 @@
             </div>`).join('')}
         </div>
       </div>`,
+
+      maintenance: EPM.auth.hasModuleAccess('maintenance') ? dashboardMaintenanceHtml() : '',
 
       depreciation: `
       <div class="card dash-section dash-depreciation">
@@ -427,6 +583,8 @@
       .map(item => sections[item.id]).join('');
 
     renderShell('dashboard', toolbarHtml + bodyHtml);
+    const gotoMaint = document.getElementById('goto-maint-btn');
+    if (gotoMaint) gotoMaint.addEventListener('click', () => navigate('/maintenance'));
 
     document.querySelectorAll('[data-nav]').forEach(row => row.addEventListener('click', () => navigate(row.dataset.nav.replace('#', ''))));
 
@@ -541,6 +699,7 @@
   let eqSelected = new Set();
   let eqPage = 1;
   let eqAdvancedOpen = false;
+  let eqSearchFocus = false;
 
   function getEqColumns() {
     const saved = S.read(S.KEYS.equipmentColumns, null);
@@ -625,6 +784,7 @@
         <button class="btn btn-ghost" id="eq-advanced-toggle">進階篩選${activeFilterCount ? ` (${activeFilterCount})` : ''} ${eqAdvancedOpen ? '▲' : '▼'}</button>
         <div class="toolbar-spacer"></div>
         <button class="btn btn-ghost" id="eq-columns-btn">欄位設定</button>
+        <button class="btn btn-ghost" id="eq-labels">🏷️ QR 標籤</button>
         <button class="btn btn-ghost" id="eq-export">匯出 CSV</button>
         <button class="btn btn-primary" id="eq-add">＋ 新增設備</button>
       </div>
@@ -651,6 +811,7 @@
       <div class="bulk-bar">
         <strong>已選取 ${eqSelected.size} 筆</strong>
         <button class="btn btn-sm btn-ghost" id="bulk-export">匯出選取項目 CSV</button>
+        <button class="btn btn-sm btn-ghost" id="bulk-labels">🏷️ 列印選取項目 QR 標籤</button>
         ${isAdmin ? `
         <select class="input" id="bulk-status" style="width:auto;">
           <option value="">批次變更狀態…</option>
@@ -694,10 +855,27 @@
         </div>
       </div>`;
     renderShell('equipment', html);
+    if (eqSearchFocus) {
+      const si = document.getElementById('eq-search');
+      si.focus();
+      si.setSelectionRange(si.value.length, si.value.length);
+      eqSearchFocus = false;
+    }
 
     const resetPage = () => { eqPage = 1; };
 
-    document.getElementById('eq-search').addEventListener('input', (e) => { eqFilters.search = e.target.value; resetPage(); renderEquipmentList(); });
+    document.getElementById('eq-search').addEventListener('input', (e) => {
+      // A USB/handheld scanner "types" the label's URL into the search box:
+      // jump straight to that equipment.
+      const hit = /#\/qr\/([^\s/?#]+)/.exec(e.target.value);
+      if (hit) {
+        eqFilters.search = '';
+        navigate('/qr/' + hit[1]);
+        return;
+      }
+      eqFilters.search = e.target.value; resetPage(); eqSearchFocus = true; renderEquipmentList();
+    });
+    document.getElementById('eq-labels').addEventListener('click', () => openLabelPrintModal(sorted, `目前清單（${sorted.length} 台）`));
     document.getElementById('eq-filter-category').addEventListener('change', (e) => { eqFilters.category = e.target.value; resetPage(); renderEquipmentList(); });
     document.getElementById('eq-filter-status').addEventListener('change', (e) => { eqFilters.status = e.target.value; resetPage(); renderEquipmentList(); });
     document.getElementById('eq-advanced-toggle').addEventListener('click', () => { eqAdvancedOpen = !eqAdvancedOpen; renderEquipmentList(); });
@@ -751,6 +929,11 @@
       const items = all.filter(e => eqSelected.has(e.id));
       EPM.reports.exportEquipmentCSV(items);
       toast(`已匯出 ${items.length} 筆選取設備 CSV`);
+    });
+    const bulkLabelsBtn = document.getElementById('bulk-labels');
+    if (bulkLabelsBtn) bulkLabelsBtn.addEventListener('click', () => {
+      const items = sorted.filter(e => eqSelected.has(e.id));
+      openLabelPrintModal(items, `選取的 ${items.length} 台設備`);
     });
     const bulkStatusSel = document.getElementById('bulk-status');
     if (bulkStatusSel) bulkStatusSel.addEventListener('change', (e) => {
@@ -903,7 +1086,7 @@
       <div class="card">
         <div class="card-header">
           <h3>${esc(eq.name)} <span class="mono muted">(${esc(eq.code)})</span></h3>
-          <div class="card-header-actions">${statusBadge(eq.status)}<button class="btn btn-sm btn-ghost" id="eq-edit-btn">編輯</button></div>
+          <div class="card-header-actions">${statusBadge(eq.status)}<button class="btn btn-sm btn-ghost" id="eq-qr-btn">🏷️ QR 標籤</button><button class="btn btn-sm btn-ghost" id="eq-edit-btn">編輯</button></div>
         </div>
         <div class="detail-grid">
           <div><span class="detail-label">類別</span><span>${esc(eq.category || '—')}</span></div>
@@ -924,6 +1107,8 @@
             </div>
           </div>` : ''}
       </div>
+
+      ${EPM.auth.hasModuleAccess('maintenance') ? equipmentMaintenanceHtml(eq, isAdmin) : ''}
 
       <div class="card">
         <div class="card-header"><h3>更換紀錄</h3><button class="btn btn-sm btn-primary" id="add-replacement-btn">＋ 新增更換紀錄</button></div>
@@ -971,6 +1156,8 @@
     renderShell('equipment', html);
     document.getElementById('back-btn').addEventListener('click', () => navigate('/equipment'));
     document.getElementById('eq-edit-btn').addEventListener('click', () => openEquipmentForm(eq));
+    document.getElementById('eq-qr-btn').addEventListener('click', () => openEquipmentQrModal(eq));
+    if (EPM.auth.hasModuleAccess('maintenance')) wireMaintenanceActions(() => renderEquipmentDetail(id));
     document.getElementById('add-replacement-btn').addEventListener('click', () => openReplacementForm(eq));
     document.getElementById('add-quote-btn').addEventListener('click', () => openQuoteForm(eq));
     root.querySelectorAll('[data-del-rep]').forEach(b => b.addEventListener('click', () => {
@@ -1250,6 +1437,7 @@
         <button class="btn btn-ghost" id="export-eq">匯出設備清單</button>
         <button class="btn btn-ghost" id="export-rep">匯出更換紀錄</button>
         <button class="btn btn-ghost" id="export-quote">匯出報價紀錄</button>
+        <button class="btn btn-ghost" id="export-maint">匯出保養維修紀錄</button>
         <button class="btn btn-primary" id="print-report">🖨️ 產生報表 PDF</button>
       </div>
 
@@ -1364,6 +1552,7 @@
     document.getElementById('export-eq').addEventListener('click', () => { EPM.reports.exportEquipmentCSV(); toast('已匯出設備清單 CSV'); });
     document.getElementById('export-rep').addEventListener('click', () => { EPM.reports.exportReplacementsCSV(); toast('已匯出更換紀錄 CSV'); });
     document.getElementById('export-quote').addEventListener('click', () => { EPM.reports.exportQuotesCSV(); toast('已匯出報價紀錄 CSV'); });
+    document.getElementById('export-maint').addEventListener('click', () => { EPM.maintenance.exportLogsCSV(); toast('已匯出保養維修紀錄 CSV'); });
     document.getElementById('print-report').addEventListener('click', () => window.print());
   }
 
@@ -1583,6 +1772,822 @@
     });
   }
 
+  /* ---------- maintenance (保養維修) ---------- */
+  const M = EPM.maintenance;
+
+  function planDueBadge(p) {
+    if (p.active === false) return '<span class="badge badge-muted">已暫停</span>';
+    if (p.daysLeft === null || p.daysLeft === undefined) return '<span class="badge badge-muted">—</span>';
+    if (p.daysLeft < 0) return `<span class="badge badge-crit">逾期 ${Math.abs(p.daysLeft)} 天</span>`;
+    if (p.daysLeft === 0) return '<span class="badge badge-warn">今天到期</span>';
+    if (p.tier === 'soon') return `<span class="badge badge-warn">${p.daysLeft} 天後到期</span>`;
+    return `<span class="badge badge-good">${p.daysLeft} 天後</span>`;
+  }
+  function logStatusBadge(l) {
+    return l.status === 'open' ? '<span class="badge badge-warn">處理中</span>' : '<span class="badge badge-good">已完成</span>';
+  }
+  function logTypeBadge(l) {
+    return l.type === 'repair' ? '<span class="badge badge-crit">維修</span>' : '<span class="badge badge-muted">保養</span>';
+  }
+  function eqLabel(id) {
+    const eq = EPM.equipment.get(id);
+    return eq ? `${eq.name} <span class="mono muted">(${esc(eq.code)})</span>` : '<span class="muted">（設備已刪除）</span>';
+  }
+  function eqLabelText(id) { const eq = EPM.equipment.get(id); return eq ? eq.name + ' ' + eq.code : ''; }
+
+  function equipmentOptions(selectedId) {
+    return EPM.equipment.list()
+      .filter(e => e.status !== 'retired' || e.id === selectedId)
+      .sort((a, b) => String(a.code).localeCompare(String(b.code)))
+      .map(e => `<option value="${e.id}" ${e.id === selectedId ? 'selected' : ''}>${esc(e.code)}　${esc(e.name)}</option>`).join('');
+  }
+
+  function planRowsHtml(plans, opts) {
+    const isAdmin = EPM.auth.isAdmin();
+    return plans.map(p => `
+      <tr>
+        ${opts.showEquipment ? `<td data-label="設備"><a href="#/equipment/${p.equipmentId}">${eqLabel(p.equipmentId)}</a></td>` : ''}
+        <td data-label="保養項目">${esc(p.title)}</td>
+        <td data-label="週期">${esc(M.intervalLabel(p))}</td>
+        <td class="mono" data-label="上次保養">${fmtDate(p.lastDoneDate)}</td>
+        <td class="mono" data-label="下次到期">${fmtDate(p.nextDueDate)}</td>
+        <td data-label="狀態">${planDueBadge(p)}</td>
+        <td class="row-actions">
+          ${p.active !== false ? `<button class="btn btn-sm btn-primary" data-mp-complete="${p.id}">✔ 完成保養</button>` : ''}
+          <button class="btn btn-sm btn-ghost" data-mp-edit="${p.id}">編輯</button>
+          ${isAdmin ? `<button class="btn btn-sm btn-ghost btn-danger" data-mp-del="${p.id}">刪除</button>` : ''}
+        </td>
+      </tr>`).join('');
+  }
+
+  function logRowsHtml(logs, opts) {
+    const isAdmin = EPM.auth.isAdmin();
+    return logs.map(l => `
+      <tr>
+        <td class="mono" data-label="日期">${fmtDate(l.date)}</td>
+        ${opts.showEquipment ? `<td data-label="設備"><a href="#/equipment/${l.equipmentId}">${eqLabel(l.equipmentId)}</a></td>` : ''}
+        <td data-label="類型">${logTypeBadge(l)}</td>
+        <td data-label="項目">${esc(l.title)}${l.description ? `<div class="muted cell-sub">${esc(l.description)}</div>` : ''}</td>
+        <td class="mono" data-label="費用">${l.status === 'open' && !l.cost ? '—' : fmtMoney(l.cost)}</td>
+        <td data-label="廠商">${esc(l.vendor || '—')}</td>
+        <td data-label="經辦人">${esc(l.operator || '—')}</td>
+        <td data-label="狀態">${logStatusBadge(l)}${l.status === 'done' && l.completedDate && l.completedDate !== l.date ? `<div class="muted cell-sub mono">${esc(l.completedDate)} 完成</div>` : ''}</td>
+        <td data-label="照片">${EPM.photos.thumbRowHtml(l.photos, l.id)}</td>
+        <td class="row-actions">
+          ${l.status === 'open' ? `<button class="btn btn-sm btn-primary" data-ml-close="${l.id}">結案</button>` : ''}
+          ${isAdmin ? `<button class="btn btn-sm btn-ghost btn-danger" data-ml-del="${l.id}">刪除</button>` : ''}
+        </td>
+      </tr>`).join('');
+  }
+
+  function dashboardMaintenanceHtml() {
+    const due = M.dueSoon();
+    const open = M.openRepairs();
+    return `
+      <div class="card dash-section dash-maintenance">
+        <div class="card-header"><h3>保養維修提醒</h3><button class="btn btn-sm btn-ghost" id="goto-maint-btn">前往保養維修</button></div>
+        <div class="mini-stat-row">
+          <div class="mini-stat"><div class="mini-stat-value ${due.some(p => p.tier === 'overdue') ? 'text-crit' : ''}">${due.filter(p => p.tier === 'overdue').length}</div><div class="mini-stat-label">逾期保養</div></div>
+          <div class="mini-stat"><div class="mini-stat-value">${due.filter(p => p.tier === 'soon').length}</div><div class="mini-stat-label">即將到期</div></div>
+          <div class="mini-stat"><div class="mini-stat-value ${open.length ? 'text-warn' : ''}">${open.length}</div><div class="mini-stat-label">處理中報修</div></div>
+          <div class="mini-stat"><div class="mini-stat-value">${fmtMoney(M.costInYear())}</div><div class="mini-stat-label">本年保養維修費用</div></div>
+        </div>
+        ${due.length || open.length ? `
+        <ul class="activity-list">
+          ${due.slice(0, 6).map(p => `
+            <li class="row-link" data-nav="#/equipment/${p.equipmentId}">
+              <div class="activity-main">${planDueBadge(p)} <strong>${esc(eqLabelText(p.equipmentId))}</strong> · ${esc(p.title)}</div>
+              <div class="activity-time">預定 ${esc(p.nextDueDate)}</div>
+            </li>`).join('')}
+          ${open.slice(0, 4).map(l => `
+            <li class="row-link" data-nav="#/equipment/${l.equipmentId}">
+              <div class="activity-main"><span class="badge badge-warn">報修中</span> <strong>${esc(eqLabelText(l.equipmentId))}</strong> · ${esc(l.title)}</div>
+              <div class="activity-time">報修 ${esc(l.date)}</div>
+            </li>`).join('')}
+        </ul>` : '<div class="empty-cell">目前沒有到期的保養或處理中的報修</div>'}
+      </div>`;
+  }
+
+  function equipmentMaintenanceHtml(eq) {
+    const plans = M.listPlans(eq.id).map(M.planStatus).sort((a, b) => (a.daysLeft ?? 1e9) - (b.daysLeft ?? 1e9));
+    const logs = M.listLogs(eq.id).sort((a, b) => String(b.date).localeCompare(String(a.date)) || b.createdAt - a.createdAt);
+    return `
+      <div class="card">
+        <div class="card-header"><h3>保養排程</h3><button class="btn btn-sm btn-primary" data-mp-add="${eq.id}">＋ 新增保養排程</button></div>
+        <div class="table-wrap">
+          <table class="table">
+            <thead><tr><th>保養項目</th><th>週期</th><th>上次保養</th><th>下次到期</th><th>狀態</th><th></th></tr></thead>
+            <tbody>${plans.length ? planRowsHtml(plans, {}) : '<tr><td colspan="6" class="empty-cell">尚未設定保養排程</td></tr>'}</tbody>
+          </table>
+        </div>
+      </div>
+      <div class="card">
+        <div class="card-header">
+          <h3>保養／維修紀錄</h3>
+          <div class="card-header-actions">
+            <button class="btn btn-sm btn-ghost" data-ml-add="repair" data-eq="${eq.id}">🛠️ 報修／維修</button>
+            <button class="btn btn-sm btn-ghost" data-ml-add="maintenance" data-eq="${eq.id}">＋ 保養紀錄</button>
+          </div>
+        </div>
+        <div class="table-wrap">
+          <table class="table">
+            <thead><tr><th>日期</th><th>類型</th><th>項目</th><th>費用</th><th>廠商</th><th>經辦人</th><th>狀態</th><th>照片</th><th></th></tr></thead>
+            <tbody>${logs.length ? logRowsHtml(logs, {}) : '<tr><td colspan="9" class="empty-cell">尚無保養維修紀錄</td></tr>'}</tbody>
+          </table>
+        </div>
+      </div>`;
+  }
+
+  // Binds every maintenance action button on the current page; `refresh`
+  // re-renders the page afterwards.
+  function wireMaintenanceActions(refresh) {
+    root.querySelectorAll('[data-mp-add]').forEach(b => b.addEventListener('click', () => openPlanForm(null, b.dataset.mpAdd, refresh)));
+    root.querySelectorAll('[data-mp-complete]').forEach(b => b.addEventListener('click', () => openCompletePlanForm(M.getPlan(b.dataset.mpComplete), refresh)));
+    root.querySelectorAll('[data-mp-edit]').forEach(b => b.addEventListener('click', () => openPlanForm(M.getPlan(b.dataset.mpEdit), null, refresh)));
+    root.querySelectorAll('[data-mp-del]').forEach(b => b.addEventListener('click', () => {
+      const p = M.getPlan(b.dataset.mpDel);
+      if (p && confirmAction(`確定要刪除保養排程「${p.title}」嗎？（已完成的保養紀錄會保留）`)) { M.removePlan(p.id); toast('已刪除保養排程'); refresh(); }
+    }));
+    root.querySelectorAll('[data-ml-add]').forEach(b => b.addEventListener('click', () => openLogForm(b.dataset.eq || '', b.dataset.mlAdd, refresh)));
+    root.querySelectorAll('[data-ml-close]').forEach(b => b.addEventListener('click', () => {
+      const l = M.listLogs().find(x => x.id === b.dataset.mlClose);
+      if (l) openCloseRepairForm(l, refresh);
+    }));
+    root.querySelectorAll('[data-ml-del]').forEach(b => b.addEventListener('click', () => {
+      const l = M.listLogs().find(x => x.id === b.dataset.mlDel);
+      if (l && confirmAction(`確定要刪除這筆${M.LOG_TYPE_LABEL[l.type]}紀錄嗎？`)) { M.removeLog(l.id); toast('已刪除紀錄'); refresh(); }
+    }));
+    root.querySelectorAll('[data-open-photos]').forEach(el => el.addEventListener('click', (e) => {
+      const l = M.listLogs().find(x => x.id === el.dataset.openPhotos);
+      if (l) { e.stopPropagation(); EPM.photos.openLightbox(l.photos, 0); }
+    }));
+  }
+
+  let maintTab = 'schedule';
+  let maintFilters = { search: '', status: '', type: '' };
+
+  function renderMaintenance() {
+    const schedule = M.listPlans().map(M.planStatus)
+      .sort((a, b) => (a.active === false) - (b.active === false) || (a.daysLeft ?? 1e9) - (b.daysLeft ?? 1e9));
+    const logs = M.listLogs().slice().sort((a, b) => String(b.date).localeCompare(String(a.date)) || b.createdAt - a.createdAt);
+    const due = M.dueSoon();
+    const open = M.openRepairs();
+    const q = maintFilters.search.toLowerCase();
+    const match = (eqId, text) => !q || (eqLabelText(eqId) + ' ' + text).toLowerCase().includes(q);
+
+    const plans = schedule.filter(p => {
+      if (maintFilters.status === 'overdue' && p.tier !== 'overdue') return false;
+      if (maintFilters.status === 'soon' && p.tier !== 'soon') return false;
+      if (maintFilters.status === 'paused' && p.active !== false) return false;
+      if (maintFilters.status && maintFilters.status !== 'paused' && p.active === false) return false;
+      return match(p.equipmentId, p.title + ' ' + (p.vendor || ''));
+    });
+    const shownLogs = logs.filter(l => {
+      if (maintFilters.type && l.type !== maintFilters.type) return false;
+      if (maintFilters.status === 'open' && l.status !== 'open') return false;
+      return match(l.equipmentId, l.title + ' ' + (l.description || '') + ' ' + (l.vendor || ''));
+    });
+
+    const html = `
+      <div class="stat-grid">
+        <div class="stat-card ${due.some(p => p.tier === 'overdue') ? 'stat-warn' : ''}">
+          <div class="stat-label">逾期保養</div>
+          <div class="stat-value">${due.filter(p => p.tier === 'overdue').length}</div>
+          <div class="stat-sub">已超過預定日期</div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-label">即將到期</div>
+          <div class="stat-value">${due.filter(p => p.tier === 'soon').length}</div>
+          <div class="stat-sub">進入提醒天數內</div>
+        </div>
+        <div class="stat-card ${open.length ? 'stat-warn' : ''}">
+          <div class="stat-label">處理中報修</div>
+          <div class="stat-value">${open.length}</div>
+          <div class="stat-sub">尚未結案</div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-label">本年保養維修費用</div>
+          <div class="stat-value">${fmtMoney(M.costInYear())}</div>
+          <div class="stat-sub">${new Date().getFullYear()} 年已完成項目</div>
+        </div>
+      </div>
+
+      <div class="toolbar">
+        <div class="range-btn-group">
+          <button type="button" class="range-btn ${maintTab === 'schedule' ? 'active' : ''}" data-maint-tab="schedule">保養排程（${schedule.length}）</button>
+          <button type="button" class="range-btn ${maintTab === 'logs' ? 'active' : ''}" data-maint-tab="logs">保養維修紀錄（${logs.length}）</button>
+        </div>
+        <input type="text" class="input" id="maint-search" placeholder="搜尋設備、項目或廠商…" value="${esc(maintFilters.search)}" />
+        ${maintTab === 'schedule' ? `
+        <select class="input" id="maint-status">
+          <option value="">全部排程</option>
+          <option value="overdue" ${maintFilters.status === 'overdue' ? 'selected' : ''}>已逾期</option>
+          <option value="soon" ${maintFilters.status === 'soon' ? 'selected' : ''}>即將到期</option>
+          <option value="paused" ${maintFilters.status === 'paused' ? 'selected' : ''}>已暫停</option>
+        </select>` : `
+        <select class="input" id="maint-type">
+          <option value="">全部類型</option>
+          <option value="maintenance" ${maintFilters.type === 'maintenance' ? 'selected' : ''}>保養</option>
+          <option value="repair" ${maintFilters.type === 'repair' ? 'selected' : ''}>維修</option>
+        </select>
+        <select class="input" id="maint-status">
+          <option value="">全部狀態</option>
+          <option value="open" ${maintFilters.status === 'open' ? 'selected' : ''}>處理中</option>
+        </select>`}
+        <div class="toolbar-spacer"></div>
+        ${maintTab === 'logs' ? '<button class="btn btn-ghost" id="maint-export">匯出 CSV</button>' : ''}
+        <button class="btn btn-ghost" data-ml-add="repair">🛠️ 報修／維修</button>
+        <button class="btn btn-primary" id="maint-add-plan">＋ 新增保養排程</button>
+      </div>
+
+      <div class="card">
+        <div class="table-wrap">
+          ${maintTab === 'schedule' ? `
+          <table class="table">
+            <thead><tr><th>設備</th><th>保養項目</th><th>週期</th><th>上次保養</th><th>下次到期</th><th>狀態</th><th></th></tr></thead>
+            <tbody>${plans.length ? planRowsHtml(plans, { showEquipment: true }) : `<tr><td colspan="7" class="empty-cell">${schedule.length ? '找不到符合條件的保養排程' : '尚未建立保養排程，點右上角「新增保養排程」開始'}</td></tr>`}</tbody>
+          </table>` : `
+          <table class="table">
+            <thead><tr><th>日期</th><th>設備</th><th>類型</th><th>項目</th><th>費用</th><th>廠商</th><th>經辦人</th><th>狀態</th><th>照片</th><th></th></tr></thead>
+            <tbody>${shownLogs.length ? logRowsHtml(shownLogs, { showEquipment: true }) : '<tr><td colspan="10" class="empty-cell">尚無符合條件的紀錄</td></tr>'}</tbody>
+          </table>`}
+        </div>
+      </div>`;
+    renderShell('maintenance', html);
+    if (maintSearchFocus) {
+      const si = document.getElementById('maint-search');
+      si.focus();
+      si.setSelectionRange(si.value.length, si.value.length);
+      maintSearchFocus = false;
+    }
+
+    root.querySelectorAll('[data-maint-tab]').forEach(b => b.addEventListener('click', () => {
+      maintTab = b.dataset.maintTab;
+      maintFilters.status = '';
+      renderMaintenance();
+    }));
+    document.getElementById('maint-search').addEventListener('input', (e) => { maintFilters.search = e.target.value; maintSearchFocus = true; renderMaintenance(); });
+    const st = document.getElementById('maint-status');
+    if (st) st.addEventListener('change', (e) => { maintFilters.status = e.target.value; renderMaintenance(); });
+    const ty = document.getElementById('maint-type');
+    if (ty) ty.addEventListener('change', (e) => { maintFilters.type = e.target.value; renderMaintenance(); });
+    const ex = document.getElementById('maint-export');
+    if (ex) ex.addEventListener('click', () => { M.exportLogsCSV(); toast('已匯出保養維修紀錄 CSV'); });
+    document.getElementById('maint-add-plan').addEventListener('click', () => openPlanForm(null, '', renderMaintenance));
+    wireMaintenanceActions(renderMaintenance);
+  }
+  let maintSearchFocus = false;
+
+  function noEquipmentGuard() {
+    if (EPM.equipment.list().some(e => e.status !== 'retired')) return false;
+    toast('請先在設備清單新增設備', 'error');
+    return true;
+  }
+
+  function openPlanForm(existing, equipmentId, refresh) {
+    if (!existing && !equipmentId && noEquipmentGuard()) return;
+    const isEdit = !!existing;
+    const p = existing || { intervalValue: 3, intervalUnit: 'month', remindDays: 7, nextDueDate: M.addInterval(M.todayStr(), 3, 'month') };
+    const eqId = existing ? existing.equipmentId : equipmentId;
+    const html = `
+      <div class="modal-header"><h3>${isEdit ? '編輯保養排程' : '新增保養排程'}</h3><button class="icon-btn" data-close-modal>✕</button></div>
+      <form id="plan-form" class="form modal-body">
+        <label class="field"><span>設備 *</span>
+          <select name="equipmentId" required ${isEdit || equipmentId ? 'disabled' : ''}>
+            ${eqId ? '' : '<option value="">請選擇設備…</option>'}${equipmentOptions(eqId)}
+          </select>
+        </label>
+        <label class="field"><span>保養項目 *</span><input type="text" name="title" required value="${esc(p.title || '')}" placeholder="例如：更換濾網、清潔保養、定期校正" /></label>
+        <div class="form-row">
+          <label class="field"><span>保養週期 *</span>
+            <div class="inline-fields">
+              <span class="muted">每</span>
+              <input type="number" min="1" name="intervalValue" required value="${p.intervalValue}" style="width:80px;" />
+              <select name="intervalUnit">
+                ${Object.entries(M.UNIT_LABEL).map(([k, v]) => `<option value="${k}" ${p.intervalUnit === k ? 'selected' : ''}>${v}</option>`).join('')}
+              </select>
+            </div>
+          </label>
+          <label class="field"><span>下次保養日期 *</span><input type="date" name="nextDueDate" required value="${esc(p.nextDueDate || '')}" /></label>
+        </div>
+        <div class="form-row">
+          <label class="field"><span>提前提醒天數</span><input type="number" min="0" name="remindDays" value="${p.remindDays ?? 7}" /></label>
+          <label class="field"><span>預估費用</span><input type="number" min="0" name="estimatedCost" value="${p.estimatedCost || ''}" /></label>
+        </div>
+        <label class="field"><span>保養廠商</span><input type="text" name="vendor" value="${esc(p.vendor || '')}" /></label>
+        <label class="field"><span>備註</span><textarea name="notes" rows="2">${esc(p.notes || '')}</textarea></label>
+        ${isEdit ? `<label class="checkbox-field"><input type="checkbox" name="active" ${p.active !== false ? 'checked' : ''} /> 啟用此排程（取消勾選即暫停，不再提醒）</label>` : ''}
+        <div class="modal-footer">
+          <button type="button" class="btn btn-ghost" data-close-modal>取消</button>
+          <button type="submit" class="btn btn-primary">${isEdit ? '儲存變更' : '新增排程'}</button>
+        </div>
+      </form>`;
+    openModal(html, {
+      onMount: (m) => {
+        const form = m.querySelector('#plan-form');
+        // Suggest the first due date from the interval while creating.
+        if (!isEdit) {
+          const syncDue = () => {
+            form.nextDueDate.value = M.addInterval(M.todayStr(), form.intervalValue.value, form.intervalUnit.value);
+          };
+          form.intervalValue.addEventListener('input', syncDue);
+          form.intervalUnit.addEventListener('change', syncDue);
+        }
+        form.addEventListener('submit', (e) => {
+          e.preventDefault();
+          const fd = new FormData(form);
+          const data = Object.fromEntries(fd.entries());
+          if (isEdit) {
+            delete data.equipmentId;
+            data.active = fd.get('active') === 'on';
+            M.updatePlan(existing.id, data);
+          } else {
+            data.equipmentId = eqId || data.equipmentId;
+            if (!data.equipmentId) { toast('請選擇設備', 'error'); return; }
+            M.createPlan(data);
+          }
+          closeModal();
+          toast(isEdit ? '已儲存保養排程' : '已新增保養排程');
+          refresh();
+        });
+      }
+    });
+  }
+
+  function openCompletePlanForm(plan, refresh) {
+    if (!plan) return;
+    const html = `
+      <div class="modal-header"><h3>完成保養 — ${esc(plan.title)}</h3><button class="icon-btn" data-close-modal>✕</button></div>
+      <form id="complete-form" class="form modal-body">
+        <div class="muted" style="font-size:13px;">${eqLabel(plan.equipmentId)}　${esc(M.intervalLabel(plan))}，預定 ${esc(plan.nextDueDate || '—')}</div>
+        <div class="form-row">
+          <label class="field"><span>保養日期 *</span><input type="date" name="date" required value="${M.todayStr()}" /></label>
+          <label class="field"><span>費用</span><input type="number" min="0" name="cost" value="${plan.estimatedCost || ''}" /></label>
+        </div>
+        <label class="field"><span>保養廠商</span><input type="text" name="vendor" value="${esc(plan.vendor || '')}" /></label>
+        <label class="field"><span>保養內容／結果</span><textarea name="description" rows="2"></textarea></label>
+        <label class="field"><span>照片</span><div id="complete-photo-picker"></div></label>
+        <div class="form-hint" id="complete-next"></div>
+        <div class="modal-footer">
+          <button type="button" class="btn btn-ghost" data-close-modal>取消</button>
+          <button type="submit" class="btn btn-primary">完成並排定下次保養</button>
+        </div>
+      </form>`;
+    const photos = [];
+    openModal(html, {
+      onMount: (m) => {
+        EPM.photos.mountPicker(m.querySelector('#complete-photo-picker'), photos);
+        const form = m.querySelector('#complete-form');
+        const next = m.querySelector('#complete-next');
+        const showNext = () => { next.textContent = '下次保養日期將排定為 ' + M.addInterval(form.date.value, plan.intervalValue, plan.intervalUnit); };
+        form.date.addEventListener('change', showNext);
+        showNext();
+        form.addEventListener('submit', (e) => {
+          e.preventDefault();
+          const data = Object.fromEntries(new FormData(form).entries());
+          data.photos = photos;
+          M.completePlan(plan.id, data);
+          closeModal();
+          toast('已完成保養，並排定下次保養日期');
+          refresh();
+        });
+      }
+    });
+  }
+
+  function openLogForm(equipmentId, type, refresh) {
+    if (!equipmentId && noEquipmentGuard()) return;
+    const isRepair = type === 'repair';
+    const html = `
+      <div class="modal-header"><h3>${isRepair ? '報修／維修紀錄' : '新增保養紀錄'}</h3><button class="icon-btn" data-close-modal>✕</button></div>
+      <form id="log-form" class="form modal-body">
+        <label class="field"><span>設備 *</span>
+          <select name="equipmentId" required ${equipmentId ? 'disabled' : ''}>
+            ${equipmentId ? '' : '<option value="">請選擇設備…</option>'}${equipmentOptions(equipmentId)}
+          </select>
+        </label>
+        <label class="field"><span>${isRepair ? '故障／維修項目 *' : '保養項目 *'}</span><input type="text" name="title" required placeholder="${isRepair ? '例如：無法開機、異音、漏水' : '例如：清潔保養'}" /></label>
+        ${isRepair ? `
+        <div class="form-row">
+          <label class="field"><span>處理狀態</span>
+            <select name="status">
+              <option value="open">報修中（尚未修好）</option>
+              <option value="done">已修復</option>
+            </select>
+          </label>
+          <label class="field"><span>報修日期 *</span><input type="date" name="date" required value="${M.todayStr()}" /></label>
+        </div>` : `
+        <label class="field"><span>保養日期 *</span><input type="date" name="date" required value="${M.todayStr()}" /></label>`}
+        <div class="form-row">
+          <label class="field"><span>費用</span><input type="number" min="0" name="cost" /></label>
+          <label class="field"><span>廠商</span><input type="text" name="vendor" /></label>
+        </div>
+        <label class="field"><span>${isRepair ? '故障說明／處理經過' : '保養內容'}</span><textarea name="description" rows="2"></textarea></label>
+        <label class="field"><span>照片</span><div id="log-photo-picker"></div></label>
+        ${isRepair ? `<label class="checkbox-field" id="log-status-sync"><input type="checkbox" name="syncStatus" checked /> <span id="log-status-sync-label"></span></label>` : ''}
+        <div class="modal-footer">
+          <button type="button" class="btn btn-ghost" data-close-modal>取消</button>
+          <button type="submit" class="btn btn-primary">新增紀錄</button>
+        </div>
+      </form>`;
+    const photos = [];
+    openModal(html, {
+      onMount: (m) => {
+        EPM.photos.mountPicker(m.querySelector('#log-photo-picker'), photos);
+        const form = m.querySelector('#log-form');
+        const syncLabel = m.querySelector('#log-status-sync-label');
+        const updateSyncLabel = () => {
+          if (!syncLabel) return;
+          syncLabel.textContent = form.status.value === 'open'
+            ? '同步將設備狀態改為「故障維修」'
+            : '設備狀態若為「故障維修」，改回「使用中」';
+        };
+        if (form.status) { form.status.addEventListener('change', updateSyncLabel); updateSyncLabel(); }
+        form.addEventListener('submit', (e) => {
+          e.preventDefault();
+          const fd = new FormData(form);
+          const data = Object.fromEntries(fd.entries());
+          data.equipmentId = equipmentId || data.equipmentId;
+          if (!data.equipmentId) { toast('請選擇設備', 'error'); return; }
+          data.type = isRepair ? 'repair' : 'maintenance';
+          data.status = isRepair ? data.status : 'done';
+          data.photos = photos;
+          M.addLog(data);
+          if (isRepair && fd.get('syncStatus') === 'on') {
+            const target = EPM.equipment.get(data.equipmentId);
+            if (target && data.status === 'open' && target.status !== 'damaged') EPM.equipment.update(target.id, { status: 'damaged' });
+            if (target && data.status === 'done' && target.status === 'damaged') EPM.equipment.update(target.id, { status: 'active' });
+          }
+          closeModal();
+          toast(isRepair && data.status === 'open' ? '已建立報修單' : '已新增紀錄');
+          refresh();
+        });
+      }
+    });
+  }
+
+  function openCloseRepairForm(log, refresh) {
+    const eq = EPM.equipment.get(log.equipmentId);
+    const html = `
+      <div class="modal-header"><h3>維修結案 — ${esc(log.title)}</h3><button class="icon-btn" data-close-modal>✕</button></div>
+      <form id="close-form" class="form modal-body">
+        <div class="muted" style="font-size:13px;">${eqLabel(log.equipmentId)}　報修日期 ${esc(log.date)}</div>
+        <div class="form-row">
+          <label class="field"><span>完成日期 *</span><input type="date" name="completedDate" required value="${M.todayStr()}" /></label>
+          <label class="field"><span>維修費用</span><input type="number" min="0" name="cost" value="${log.cost || ''}" /></label>
+        </div>
+        <label class="field"><span>維修廠商</span><input type="text" name="vendor" value="${esc(log.vendor || '')}" /></label>
+        <label class="field"><span>處理經過</span><textarea name="description" rows="3">${esc(log.description || '')}</textarea></label>
+        <label class="field"><span>照片</span><div id="close-photo-picker"></div></label>
+        ${eq && eq.status === 'damaged' ? '<label class="checkbox-field"><input type="checkbox" name="restore" checked /> 將設備狀態改回「使用中」</label>' : ''}
+        <div class="modal-footer">
+          <button type="button" class="btn btn-ghost" data-close-modal>取消</button>
+          <button type="submit" class="btn btn-primary">結案</button>
+        </div>
+      </form>`;
+    const photos = (log.photos || []).slice();
+    openModal(html, {
+      onMount: (m) => {
+        EPM.photos.mountPicker(m.querySelector('#close-photo-picker'), photos);
+        const form = m.querySelector('#close-form');
+        form.addEventListener('submit', (e) => {
+          e.preventDefault();
+          const fd = new FormData(form);
+          const data = Object.fromEntries(fd.entries());
+          data.photos = photos;
+          M.closeRepair(log.id, data);
+          if (fd.get('restore') === 'on' && eq) EPM.equipment.update(eq.id, { status: 'active' });
+          closeModal();
+          toast('已結案');
+          refresh();
+        });
+      }
+    });
+  }
+
+  /* ---------- QR code labels ---------- */
+  function openEquipmentQrModal(eq) {
+    const url = EPM.labels.equipmentUrl(eq);
+    const html = `
+      <div class="modal-header"><h3>QR Code 標籤 — ${esc(eq.code)}</h3><button class="icon-btn" data-close-modal>✕</button></div>
+      <div class="modal-body qr-modal">
+        <div class="qr-preview">${EPM.labels.qrSvg(url)}</div>
+        <div class="qr-modal-name">${esc(eq.name)}</div>
+        <div class="muted qr-modal-url">${esc(url)}</div>
+        <p class="form-hint">手機相機掃描後會開啟此設備頁面。${EPM.sync.isEnabled() ? '' : '<br><strong>提醒：</strong>手機要先連線雲端同步才看得到資料（系統設定 → 雲端同步）。'}</p>
+      </div>
+      <div class="modal-footer">
+        <button type="button" class="btn btn-ghost" id="qr-copy">複製連結</button>
+        <button type="button" class="btn btn-primary" id="qr-print">🖨️ 列印標籤</button>
+      </div>`;
+    openModal(html, {
+      onMount: (m) => {
+        m.querySelector('#qr-copy').addEventListener('click', () => {
+          const done = () => toast('已複製連結');
+          if (navigator.clipboard && navigator.clipboard.writeText) navigator.clipboard.writeText(url).then(done, () => window.prompt('請複製以下連結', url));
+          else window.prompt('請複製以下連結', url);
+        });
+        m.querySelector('#qr-print').addEventListener('click', () => openLabelPrintModal([eq], eq.name));
+      }
+    });
+  }
+
+  function openLabelPrintModal(items, desc) {
+    if (!items || !items.length) { toast('沒有可列印的設備', 'error'); return; }
+    const settings = S.read(S.KEYS.settings, {});
+    const size = settings.labelSize || 'medium';
+    const html = `
+      <div class="modal-header"><h3>列印 QR Code 標籤</h3><button class="icon-btn" data-close-modal>✕</button></div>
+      <div class="modal-body form">
+        <div class="muted" style="font-size:13px;">列印範圍：${esc(desc)}（${items.length} 張）</div>
+        <label class="field"><span>標籤尺寸</span>
+          <select id="label-size">
+            ${Object.entries(EPM.labels.SIZES).map(([k, v]) => `<option value="${k}" ${size === k ? 'selected' : ''}>${esc(v.label)}</option>`).join('')}
+          </select>
+        </label>
+        <label class="field"><span>標籤抬頭（選填，例如公司名稱）</span><input type="text" id="label-title" value="${esc(settings.labelTitle || '')}" maxlength="30" /></label>
+        <div class="label-preview" id="label-preview"></div>
+        <p class="form-hint">列印時請在列印對話框選擇「實際大小／100%」，不要縮放到符合頁面，標籤尺寸才會準確。</p>
+      </div>
+      <div class="modal-footer">
+        <button type="button" class="btn btn-ghost" data-close-modal>取消</button>
+        <button type="button" class="btn btn-primary" id="label-print-btn">🖨️ 列印</button>
+      </div>`;
+    openModal(html, {
+      onMount: (m) => {
+        const sizeSel = m.querySelector('#label-size');
+        const titleInput = m.querySelector('#label-title');
+        const preview = m.querySelector('#label-preview');
+        const draw = () => { preview.innerHTML = EPM.labels.labelHtml(items[0], sizeSel.value, { title: titleInput.value.trim() }); };
+        sizeSel.addEventListener('change', draw);
+        titleInput.addEventListener('input', draw);
+        draw();
+        m.querySelector('#label-print-btn').addEventListener('click', () => {
+          const s2 = S.read(S.KEYS.settings, {});
+          s2.labelSize = sizeSel.value;
+          s2.labelTitle = titleInput.value.trim();
+          S.write(S.KEYS.settings, s2);
+          closeModal();
+          EPM.labels.printLabels(items, sizeSel.value, { title: s2.labelTitle });
+        });
+      }
+    });
+  }
+
+  // #/qr/<id or code> — where a scanned label lands.
+  function openQrTarget(ref) {
+    const key = decodeURIComponent(ref || '');
+    const all = EPM.equipment.list();
+    const eq = all.find(e => e.id === key) || all.find(e => String(e.code).toLowerCase() === key.toLowerCase());
+    if (eq) {
+      history.replaceState(null, '', '#/equipment/' + eq.id);
+      render();
+      return;
+    }
+    if (EPM.sync.isEnabled() && EPM.sync.state.status !== 'idle') {
+      // Fresh device: the record may still be on its way down.
+      renderShell('equipment', '<div class="card"><div class="empty-cell">🔄 正在從雲端同步資料…</div></div>');
+      EPM.sync.syncNow().then(() => {
+        if (parseHash().route !== 'qr') return;
+        const again = EPM.equipment.list().find(e => e.id === key || String(e.code).toLowerCase() === key.toLowerCase());
+        if (again) { history.replaceState(null, '', '#/equipment/' + again.id); render(); }
+        else renderQrNotFound();
+      });
+      return;
+    }
+    renderQrNotFound();
+  }
+  function renderQrNotFound() {
+    renderShell('equipment', `
+      <div class="card">
+        <div class="card-header"><h3>找不到這台設備</h3></div>
+        <div class="modal-body">
+          <p>這個 QR Code 對應的設備不在這台裝置的資料中。</p>
+          ${EPM.sync.isEnabled() ? '<p class="muted">設備可能已被刪除。</p>' : '<p class="muted">若標籤是在另一台電腦列印的，請先到「系統設定 → 雲端同步」連線同一個雲端，資料同步後即可開啟。</p>'}
+          <a class="btn btn-primary" href="#/equipment">前往設備清單</a>
+        </div>
+      </div>`);
+  }
+
+  /* ---------- settings (admin): cloud sync + QR ---------- */
+  function renderSettings() {
+    if (!EPM.auth.isAdmin()) { navigate('/dashboard'); return; }
+    const cfg = EPM.sync.config();
+    const enabled = EPM.sync.isEnabled();
+    const st = EPM.sync.state;
+    const settings = S.read(S.KEYS.settings, {});
+    const link = enabled ? EPM.sync.connectLink() : '';
+    const statusText = { idle: '✅ 已同步', syncing: '🔄 同步中…', offline: '📴 離線（恢復連線後自動同步）', error: '⚠️ 同步失敗', off: '未啟用' }[st.status] || '';
+
+    const html = `
+      <div class="card">
+        <div class="card-header"><h3>☁️ 雲端同步</h3>${enabled ? '<span class="badge badge-good">已啟用</span>' : '<span class="badge badge-muted">未啟用</span>'}</div>
+        <div class="modal-body form">
+          <p class="muted settings-intro">透過您自己的 Google 試算表，讓桌面版、網頁版與手機共用同一份資料（設備、更換紀錄、報價、保養維修、使用者帳號）。資料只存放在您的 Google 帳號中。</p>
+          ${enabled ? `
+          <div class="detail-grid">
+            <div><span class="detail-label">狀態</span><span>${esc(statusText)}</span></div>
+            <div><span class="detail-label">上次同步</span><span class="mono">${st.lastSync ? new Date(st.lastSync).toLocaleString('zh-TW') : '—'}</span></div>
+            <div><span class="detail-label">待上傳變更</span><span class="mono">${EPM.sync.pendingCount()} 筆</span></div>
+            <div><span class="detail-label">後端網址</span><span class="mono settings-url">${esc(cfg.url)}</span></div>
+          </div>
+          ${st.status === 'error' && st.message ? `<div class="form-error">${esc(st.message)}</div>` : ''}
+          <div class="settings-actions">
+            <button type="button" class="btn btn-primary" id="sync-now-btn">🔄 立即同步</button>
+            <button type="button" class="btn btn-ghost btn-danger" id="sync-disable-btn">停用同步</button>
+          </div>
+          <div class="connect-box">
+            <div class="qr-preview qr-preview-sm" id="connect-qr-box" hidden>${link ? EPM.labels.qrSvg(link, { ecc: 'L' }) : ''}</div>
+            <div>
+              <h4>📲 手機／其他電腦連線</h4>
+              <p class="muted">用手機相機掃描這個 QR Code（或在其他電腦開啟連結），即可自動完成雲端同步設定，再用自己的帳號登入。</p>
+              <p class="form-hint">⚠️ 這個 QR Code 含有同步密碼，請勿張貼或分享給外人。</p>
+              <div class="settings-actions">
+                <button type="button" class="btn btn-ghost" id="connect-qr-toggle">顯示連線 QR Code</button>
+                <button type="button" class="btn btn-ghost" id="connect-copy">複製連線連結</button>
+              </div>
+            </div>
+          </div>` : `
+          <form id="sync-form" class="form">
+            <label class="field"><span>後端網址（Apps Script 網頁應用程式 /exec 網址）</span><input type="url" name="url" required placeholder="https://script.google.com/macros/s/……/exec" value="${esc(cfg.url || '')}" /></label>
+            <label class="field"><span>同步密碼（至少 4 個字元，第一次連線時設定，之後所有裝置都用同一組）</span><input type="password" name="key" required minlength="4" value="${esc(cfg.key || '')}" autocomplete="new-password" /></label>
+            <div class="form-error" id="sync-form-error" hidden></div>
+            <div class="settings-actions">
+              <button type="button" class="btn btn-ghost" id="sync-test-btn">測試連線</button>
+              <button type="submit" class="btn btn-primary">啟用同步並上傳本機資料</button>
+            </div>
+          </form>
+          <details class="setup-steps">
+            <summary>如何建立雲端後端？（約 3 分鐘）</summary>
+            <ol>
+              <li>到 Google 雲端硬碟建立一個新的 Google 試算表（例如命名為「EquipPro 雲端資料」）。</li>
+              <li>在試算表點選「擴充功能 → Apps Script」，刪除預設內容，貼上程式資料夾中 <code>cloud/Code.gs</code> 的全部內容並儲存。</li>
+              <li>點右上角「部署 → 新增部署作業」，類型選「網頁應用程式」，執行身分選「我」，誰可以存取選「所有人」，按「部署」並完成授權。</li>
+              <li>複製「網頁應用程式網址」（結尾是 <code>/exec</code>），貼到上方「後端網址」，再自訂一組同步密碼後按「啟用同步」。</li>
+            </ol>
+          </details>`}
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="card-header"><h3>🏷️ QR Code 標籤</h3></div>
+        <form id="qr-settings-form" class="form modal-body">
+          <label class="field"><span>標籤連結網址（掃描後開啟的網頁版位置）</span>
+            <input type="url" name="qrBaseUrl" placeholder="${esc(EPM.labels.DEFAULT_BASE_URL)}" value="${esc(settings.qrBaseUrl || '')}" />
+          </label>
+          <p class="form-hint">留空則使用預設的網頁版網址 ${esc(EPM.labels.DEFAULT_BASE_URL)}。變更後，先前印好的標籤仍指向舊網址。</p>
+          <div class="settings-actions"><button type="submit" class="btn btn-primary">儲存</button></div>
+        </form>
+      </div>`;
+    renderShell('settings', html);
+
+    const qrForm = document.getElementById('qr-settings-form');
+    qrForm.addEventListener('submit', (e) => {
+      e.preventDefault();
+      const s2 = S.read(S.KEYS.settings, {});
+      s2.qrBaseUrl = qrForm.qrBaseUrl.value.trim();
+      S.write(S.KEYS.settings, s2);
+      toast('已儲存 QR Code 設定');
+      renderSettings();
+    });
+
+    if (enabled) {
+      document.getElementById('sync-now-btn').addEventListener('click', () => {
+        EPM.sync.syncNow().then(() => { if (parseHash().route === 'settings') renderSettings(); });
+        renderSettings();
+      });
+      document.getElementById('sync-disable-btn').addEventListener('click', () => {
+        if (!confirmAction('確定要停用雲端同步嗎？本機資料會保留，但之後的修改不會再同步到其他裝置。')) return;
+        EPM.sync.disable();
+        EPM.auth.logActivity('停用雲端同步', '-', '-');
+        toast('已停用雲端同步');
+        renderSettings();
+      });
+      document.getElementById('connect-qr-toggle').addEventListener('click', (e) => {
+        const box = document.getElementById('connect-qr-box');
+        box.hidden = !box.hidden;
+        e.target.textContent = box.hidden ? '顯示連線 QR Code' : '隱藏連線 QR Code';
+      });
+      document.getElementById('connect-copy').addEventListener('click', () => {
+        const done = () => toast('已複製連線連結（含同步密碼，請小心保管）');
+        if (navigator.clipboard && navigator.clipboard.writeText) navigator.clipboard.writeText(link).then(done, () => window.prompt('請複製以下連結', link));
+        else window.prompt('請複製以下連結', link);
+      });
+      return;
+    }
+
+    const form = document.getElementById('sync-form');
+    const err = document.getElementById('sync-form-error');
+    const showErr = (msg) => { err.textContent = msg; err.hidden = !msg; };
+    document.getElementById('sync-test-btn').addEventListener('click', async (e) => {
+      if (!form.reportValidity()) return;
+      const btn = e.target;
+      btn.disabled = true; btn.textContent = '測試中…';
+      showErr('');
+      try {
+        const info = await EPM.sync.test(form.url.value, form.key.value);
+        const total = Object.values(info.counts || {}).reduce((a, b) => a + b, 0);
+        toast(info.claimed ? '連線成功，已設定這組同步密碼' : `連線成功，雲端目前有 ${total} 筆資料`);
+      } catch (ex) {
+        showErr(ex.message);
+      } finally {
+        btn.disabled = false; btn.textContent = '測試連線';
+      }
+    });
+    form.addEventListener('submit', async (e) => {
+      e.preventDefault();
+      const btn = form.querySelector('button[type=submit]');
+      btn.disabled = true; btn.textContent = '同步中…';
+      showErr('');
+      try {
+        await EPM.sync.connect(form.url.value, form.key.value, 'merge');
+        toast('已啟用雲端同步');
+        renderSettings();
+      } catch (ex) {
+        showErr(ex.message);
+        btn.disabled = false; btn.textContent = '啟用同步並上傳本機資料';
+      }
+    });
+  }
+
+  // New device: take the accounts and data from the cloud.
+  function openCloudConnectModal(mode) {
+    const cfg = EPM.sync.config();
+    const html = `
+      <div class="modal-header"><h3>☁️ 連線雲端同步</h3><button class="icon-btn" data-close-modal>✕</button></div>
+      <form id="cloud-connect-form" class="form modal-body">
+        <p class="muted" style="margin:0;font-size:13px;">輸入管理員提供的後端網址與同步密碼。最方便的方式是用手機掃描管理員在「系統設定 → 雲端同步」顯示的連線 QR Code。</p>
+        <label class="field"><span>後端網址</span><input type="url" name="url" required placeholder="https://script.google.com/macros/s/……/exec" value="${esc(cfg.url || '')}" /></label>
+        <label class="field"><span>同步密碼</span><input type="password" name="key" required minlength="4" autocomplete="off" /></label>
+        <p class="form-hint">連線後，這台裝置的資料會改用雲端上的資料（包含使用者帳號）。</p>
+        <div class="form-error" id="cloud-connect-error" hidden></div>
+        <div class="modal-footer">
+          <button type="button" class="btn btn-ghost" data-close-modal>取消</button>
+          <button type="submit" class="btn btn-primary">連線</button>
+        </div>
+      </form>`;
+    openModal(html, {
+      onMount: (m) => {
+        const form = m.querySelector('#cloud-connect-form');
+        const err = m.querySelector('#cloud-connect-error');
+        form.addEventListener('submit', async (e) => {
+          e.preventDefault();
+          const btn = form.querySelector('button[type=submit]');
+          btn.disabled = true; btn.textContent = '連線中…';
+          err.hidden = true;
+          try {
+            await EPM.sync.connect(form.url.value, form.key.value, mode || 'replace');
+            closeModal();
+            toast('已連線雲端，請用您的帳號登入');
+            render();
+          } catch (ex) {
+            err.textContent = ex.message; err.hidden = false;
+            btn.disabled = false; btn.textContent = '連線';
+          }
+        });
+      }
+    });
+  }
+
+  // #/connect/<token> — opened from the connect QR code.
+  function renderConnectLink(token) {
+    const info = EPM.sync.decodeConnect(token);
+    const leave = () => { history.replaceState(null, '', '#/dashboard'); render(); };
+    if (!info) { toast('連線連結無效', 'error'); leave(); return; }
+    const cfg = EPM.sync.config();
+    if (EPM.sync.isEnabled() && cfg.url === info.url && cfg.key === info.key) { toast('這台裝置已連線雲端'); leave(); return; }
+    const hasLocal = EPM.auth.hasUsers();
+    root.innerHTML = `
+      <div class="login-screen">
+        <div class="login-card">
+          <div class="login-brand">
+            <div class="brand-mark lg">EP</div>
+            <div class="brand-title lg">連線雲端同步</div>
+            <div class="brand-sub">將這台裝置連線到 EquipPro 雲端資料</div>
+          </div>
+          <div class="muted settings-url" style="font-size:12px;margin-bottom:12px;">${esc(info.url)}</div>
+          ${hasLocal ? '<div class="form-hint" style="margin-bottom:12px;">這台裝置已有本機資料。連線後會改用雲端上的資料與帳號，本機原有資料將被取代。</div>' : ''}
+          <div class="form-error" id="connect-error" hidden></div>
+          <button type="button" class="btn btn-primary btn-block" id="connect-go">連線</button>
+          <button type="button" class="btn btn-ghost btn-block" id="connect-cancel" style="margin-top:8px;">取消</button>
+        </div>
+      </div>`;
+    document.getElementById('connect-cancel').addEventListener('click', leave);
+    document.getElementById('connect-go').addEventListener('click', async (e) => {
+      const btn = e.target;
+      btn.disabled = true; btn.textContent = '連線中…';
+      try {
+        await EPM.sync.connect(info.url, info.key, 'replace');
+        toast('已連線雲端，請用您的帳號登入');
+        leave();
+      } catch (ex) {
+        const err = document.getElementById('connect-error');
+        err.textContent = ex.message; err.hidden = false;
+        btn.disabled = false; btn.textContent = '重試';
+      }
+    });
+  }
+
   /* ---------- features overview view ---------- */
   const FEATURE_GROUPS = [
     {
@@ -1603,6 +2608,23 @@
         { icon: '☑️', name: '批次操作', pro: true, desc: '多選設備後一次批次刪除、批次變更狀態、或只匯出選取項目的 CSV，大量維護資料時更有效率。' },
         { icon: '↕️', name: '表頭排序＋自訂顯示欄位', pro: true, desc: '點擊欄名即可排序，並可自由勾選要顯示的欄位（如供應商、保固、使用年限），版面設定自動記住。' },
         { icon: '📄', name: '分頁瀏覽', pro: true, desc: '設備數量龐大時自動分頁顯示，維持頁面流暢不卡頓。' }
+      ]
+    },
+    {
+      title: '保養維修',
+      items: [
+        { icon: '🔧', name: '定期保養排程', pro: true, desc: '為每台設備設定保養週期（每 N 天／週／月／年），完成保養後自動推算下次到期日，逾期與即將到期一目了然。' },
+        { icon: '🔔', name: '保養到期提醒', pro: true, desc: '登入時跳出即將到期／已逾期的保養清單，儀表板也有保養維修提醒區塊，可設定每個項目提前幾天提醒。' },
+        { icon: '🛠️', name: '報修單與維修紀錄', pro: true, desc: '設備故障時先開報修單（處理中），修好後結案並記錄費用、廠商與照片，完整保留每台設備的保養維修歷史。' },
+        { icon: '💵', name: '保養維修費用統計', pro: true, desc: '自動彙總本年度保養維修費用，並可匯出完整保養維修紀錄 CSV。' }
+      ]
+    },
+    {
+      title: 'QR Code 標籤',
+      items: [
+        { icon: '🏷️', name: 'QR Code 設備標籤', pro: true, desc: '為每台設備產生 QR Code 標籤，可選小／中／大三種尺寸，單張或批次列印後貼在設備上。' },
+        { icon: '📱', name: '手機掃描直接開啟', pro: true, desc: '用手機相機掃描標籤即可開啟該設備的資料、更換紀錄與保養排程（搭配雲端同步使用）。' },
+        { icon: '🔫', name: '支援條碼掃描槍', pro: true, desc: '在設備清單搜尋框用掃描槍掃描標籤，會直接跳到該設備頁面。' }
       ]
     },
     {
@@ -1641,7 +2663,9 @@
         { icon: '🌓', name: '深色／淺色主題', desc: '可切換自動、亮色、暗色三種顯示模式，符合不同使用情境與個人偏好。' },
         { icon: '🔐', name: '首次設定精靈', desc: '系統不內建預設帳密，首次啟動會引導建立專屬的管理員帳號，降低憑證外洩風險。' },
         { icon: '💾', name: '免安裝、免伺服器', desc: '純前端網頁應用，資料儲存在瀏覽器本機；可直接開啟使用，也能部署到任何網頁伺服器或 GitHub Pages。' },
-        { icon: '🖥️', name: '桌面版資料持久化', pro: true, desc: '桌面版資料儲存於系統 AppData 資料夾，不論日後如何安裝新版本、放在哪個資料夾，資料都不會遺失。' }
+        { icon: '🖥️', name: '桌面版資料持久化', pro: true, desc: '桌面版資料儲存於系統 AppData 資料夾，不論日後如何安裝新版本、放在哪個資料夾，資料都不會遺失。' },
+        { icon: '☁️', name: '雲端同步', pro: true, desc: '透過自己的 Google 試算表（Apps Script）讓桌面版、網頁版與手機共用同一份資料，自動雙向同步，離線時的修改會在恢復連線後上傳。' },
+        { icon: '📲', name: '手機一鍵連線', pro: true, desc: '在系統設定顯示連線 QR Code，手機掃描後自動完成雲端同步設定，不必手動輸入網址與密碼。' }
       ]
     }
   ];
@@ -1665,13 +2689,17 @@
 
   /* ---------- main render dispatch ---------- */
   function render() {
-    if (!EPM.auth.hasUsers()) { renderSetup(); return; }
-    const user = EPM.auth.getCurrentUser();
     const { route, id } = parseHash();
-    if (!user) { renderLogin(); return; }
+    if (route === 'connect') { renderConnectLink(id); return; }
+    if (!EPM.auth.hasUsers()) { rememberTarget(); renderSetup(); return; }
+    const user = EPM.auth.getCurrentUser();
+    if (!user) { rememberTarget(); renderLogin(); return; }
+    if (route === 'qr') { openQrTarget(id); return; }
     if (!EPM.auth.hasModuleAccess(route)) { navigate('/dashboard'); return; }
     switch (route) {
       case 'equipment': id ? renderEquipmentDetail(id) : renderEquipmentList(); break;
+      case 'maintenance': renderMaintenance(); break;
+      case 'settings': renderSettings(); break;
       case 'pricing': renderPricing(); break;
       case 'reports': renderReports(); break;
       case 'users': renderUsers(); break;
@@ -1680,7 +2708,7 @@
     }
   }
 
-  window.EPM.app = { render, navigate, toast, openModal, closeModal };
+  window.EPM.app = { render, navigate, toast, openModal, closeModal, onRemoteChange, updateSyncChip };
 
   /* ---------- boot ---------- */
   document.addEventListener('DOMContentLoaded', () => {
@@ -1688,6 +2716,8 @@
       EPM.storage.seed();
       applyTheme();
       render();
+      checkDueReminders();
+      EPM.sync.start();
     });
   });
 })();

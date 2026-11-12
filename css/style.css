@@ -341,6 +341,10 @@ textarea { resize: vertical; font-family: inherit; }
 .modal-body { padding: 20px 22px; }
 .modal-footer { display: flex; justify-content: flex-end; gap: 10px; padding-top: 6px; }
 .modal-card:has(.lightbox-body) { max-width: 760px; }
+.reminder-modal h4 { margin: 0 0 8px; font-size: 13px; color: var(--text-muted); }
+.reminder-modal h4:not(:first-child) { margin-top: 16px; }
+.reminder-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 6px; }
+.reminder-list li { display: flex; justify-content: space-between; gap: 12px; padding: 8px 10px; border-radius: var(--radius-sm); background: var(--page-plane); font-size: 13px; }
 
 /* ---------- photos ---------- */
 .photo-grid { display: flex; flex-wrap: wrap; gap: 10px; }
@@ -465,6 +469,70 @@ textarea { resize: vertical; font-family: inherit; }
   .table td.empty-cell::before { display: none; }
 }
 
+
+/* ---------- cloud sync chip ---------- */
+.sync-chip-btn { background: none; border: none; padding: 0; cursor: pointer; font: inherit; }
+.sync-chip {
+  display: inline-flex; align-items: center; gap: 4px; padding: 5px 10px; border-radius: 999px;
+  font-size: 12px; font-weight: 600; color: var(--text-secondary); background: var(--brand-wash); white-space: nowrap;
+}
+.sync-chip-warn { background: var(--warning-wash); }
+.sync-chip-crit { background: var(--critical-wash); color: var(--critical); }
+.login-cloud { margin-top: 16px; display: flex; flex-direction: column; align-items: center; gap: 6px; font-size: 12px; text-align: center; }
+
+/* ---------- maintenance ---------- */
+.cell-sub { font-size: 11.5px; font-weight: 400; margin-top: 2px; }
+.inline-fields { display: flex; align-items: center; gap: 8px; }
+.inline-fields select, .inline-fields input { flex: 1; }
+.form-hint { font-size: 12px; color: var(--text-muted); line-height: 1.6; margin: 0; }
+.activity-list li.row-link { cursor: pointer; }
+.activity-list li.row-link:hover { background: var(--brand-wash); }
+.activity-main .badge { margin-right: 4px; }
+
+/* ---------- QR code ---------- */
+.qr-modal { display: flex; flex-direction: column; align-items: center; text-align: center; gap: 8px; }
+.qr-preview { width: 220px; height: 220px; background: #fff; padding: 8px; border-radius: var(--radius-sm); border: 1px solid var(--border); }
+.qr-preview-sm { width: 180px; height: 180px; flex-shrink: 0; }
+.qr-preview svg, .qr-label-code svg { width: 100%; height: 100%; display: block; }
+.qr-modal-name { font-weight: 700; font-size: 15px; }
+.qr-modal-url { font-size: 11px; word-break: break-all; }
+.label-preview { display: flex; justify-content: center; padding: 14px; background: var(--page-plane); border-radius: var(--radius-sm); overflow: auto; }
+.qr-label {
+  box-sizing: border-box; display: flex; align-items: center; gap: 2mm; padding: 2mm;
+  background: #fff; color: #000; border: 0.2mm dashed #999; overflow: hidden; font-family: system-ui, sans-serif;
+}
+.qr-label-code { flex-shrink: 0; }
+.qr-label-text { min-width: 0; display: flex; flex-direction: column; gap: 0.6mm; line-height: 1.2; }
+.qr-label-org { font-size: 2.4mm; color: #444; }
+.qr-label-id { font-size: 3.6mm; font-weight: 800; font-family: ui-monospace, Consolas, monospace; }
+.qr-label-name { font-size: 3mm; font-weight: 600; overflow: hidden; display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; }
+.qr-label-sub { font-size: 2.4mm; color: #444; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+.qr-label-small { gap: 1mm; padding: 1.5mm; }
+.qr-label-small .qr-label-id { font-size: 2.8mm; }
+.qr-label-small .qr-label-name { font-size: 2.3mm; -webkit-line-clamp: 4; }
+.qr-label-small .qr-label-org { font-size: 2mm; }
+.qr-label-large .qr-label-id { font-size: 5mm; }
+.qr-label-large .qr-label-name { font-size: 4mm; }
+.qr-label-large .qr-label-sub, .qr-label-large .qr-label-org { font-size: 3mm; }
+#label-print-root { display: none; }
+
+/* ---------- settings ---------- */
+.settings-intro { margin: 0; font-size: 13px; line-height: 1.6; }
+.settings-actions { display: flex; flex-wrap: wrap; gap: 8px; }
+.settings-url { word-break: break-all; font-size: 12px; }
+.modal-body .detail-grid { padding: 0; }
+.connect-box { display: flex; gap: 18px; align-items: flex-start; padding: 16px; border: 1px solid var(--border); border-radius: var(--radius-sm); background: var(--page-plane); }
+.connect-box h4 { margin: 0 0 6px; }
+.connect-box p { margin: 0 0 8px; font-size: 12.5px; }
+.setup-steps { font-size: 13px; color: var(--text-secondary); }
+.setup-steps summary { cursor: pointer; font-weight: 700; color: var(--brand); }
+.setup-steps ol { padding-left: 20px; line-height: 1.8; }
+.setup-steps code { background: var(--brand-wash); padding: 1px 6px; border-radius: 4px; font-size: 12px; }
+@media (max-width: 760px) {
+  .connect-box { flex-direction: column; align-items: center; }
+  .topbar-actions .sync-chip { padding: 4px 8px; }
+}
+
 /* ---------- print report header (only visible when printing) ---------- */
 .print-report-header { display: none; }
 
@@ -476,4 +544,12 @@ textarea { resize: vertical; font-family: inherit; }
   body { background: #fff; }
   .print-report-header { display: block; margin-bottom: 16px; }
   .print-report-header > div:first-child { font-size: 18px; font-weight: 800; }
+
+  /* QR label sheet: print only the labels */
+  body.printing-labels > *:not(#label-print-root) { display: none !important; }
+  body.printing-labels #label-print-root { display: block; }
+  body.printing-labels { background: #fff; }
+  .qr-label-sheet { display: grid; gap: 2mm; justify-content: start; }
+  .qr-label { break-inside: avoid; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
 }
+@page { margin: 8mm; }
