@@ -776,6 +776,8 @@ textarea { resize: vertical; font-family: inherit; }
   .splash-check { stroke-dashoffset: 0; }
 }
 @media print { #splash { display: none !important; } }
+.splash-error { margin-top: 16px; font-size: 13px; color: var(--critical); line-height: 1.8; }
+.splash-error button { margin-top: 6px; padding: 6px 16px; border-radius: 6px; border: 1px solid var(--border-strong); background: var(--surface-2); color: var(--text-primary); cursor: pointer; font: inherit; }
 
 /* ---------- print report header (only visible when printing) ---------- */
 .print-report-header { display: none; }

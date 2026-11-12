@@ -41,16 +41,34 @@
   <div id="toast-root"></div>
 
   <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.4/dist/chart.umd.min.js"></script>
-  <script src="js/vendor/qrcode.js"></script>
-  <script src="js/storage.js"></script>
-  <script src="js/auth.js"></script>
-  <script src="js/equipment.js"></script>
-  <script src="js/pricing.js"></script>
-  <script src="js/reports.js"></script>
-  <script src="js/photos.js"></script>
-  <script src="js/maintenance.js"></script>
-  <script src="js/labels.js"></script>
-  <script src="js/sync.js"></script>
-  <script src="js/app.js"></script>
+  <!-- App scripts load one at a time with retries: the desktop app serves them
+       from pywebview's small built-in web server, which can drop some of many
+       simultaneous requests and leave the app stuck on the splash screen. -->
+  <script>
+    (function () {
+      var files = ['js/vendor/qrcode.js', 'js/storage.js', 'js/auth.js', 'js/equipment.js', 'js/pricing.js', 'js/reports.js', 'js/photos.js', 'js/maintenance.js', 'js/labels.js', 'js/sync.js', 'js/app.js'];
+      function fail(name) {
+        var el = document.getElementById('splash');
+        var box = document.createElement('div');
+        box.className = 'splash-error';
+        box.innerHTML = '程式檔案載入失敗（' + name + '）<br><button type="button" onclick="location.reload()">重新載入</button>';
+        (el ? el.querySelector('.splash-center') : document.body).appendChild(box);
+        if (el) el.style.animation = 'none';
+      }
+      function load(i, attempt) {
+        if (i >= files.length) return;
+        var s = document.createElement('script');
+        s.src = files[i] + (attempt ? '?retry=' + attempt + '-' + Date.now() : '');
+        s.onload = function () { load(i + 1, 0); };
+        s.onerror = function () {
+          s.remove();
+          if (attempt < 5) setTimeout(function () { load(i, attempt + 1); }, 150 * (attempt + 1));
+          else fail(files[i]);
+        };
+        document.body.appendChild(s);
+      }
+      load(0, 0);
+    })();
+  </script>
 </body>
 </html>

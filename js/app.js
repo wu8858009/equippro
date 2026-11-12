@@ -2801,7 +2801,9 @@
   window.EPM.app = { render, navigate, toast, openModal, closeModal, onRemoteChange, updateSyncChip };
 
   /* ---------- boot ---------- */
-  document.addEventListener('DOMContentLoaded', () => {
+  // Scripts are injected by the loader in index.html, so the page may have
+  // finished parsing before this file runs.
+  function boot() {
     EPM.storage.initPersistence().then(() => {
       EPM.storage.seed();
       applyTheme();
@@ -2810,5 +2812,7 @@
       checkDueReminders();
       EPM.sync.start();
     });
-  });
+  }
+  if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', boot);
+  else boot();
 })();
