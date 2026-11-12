@@ -1,108 +1,193 @@
-"""EquipPro desktop launcher.
+"""設備管家 desktop app.
 
-Wraps the existing web app (index.html + css/js) in a native desktop
-window using pywebview, so the same code that runs on GitHub Pages also
-runs as a Windows desktop app. Unlike the browser version — where data
-lives only inside the browser's hidden local storage — this launcher also
-mirrors the app's data into a plain JSON file, so it's visible, portable,
-and safe to back up. The desktop app and a browser tab still don't share
-data with each other.
+Serves the web app from a small local HTTP server (threaded, so parallel
+script loads never get dropped) and shows it in a pywebview window. Data is
+kept in %APPDATA%\\ShebeiGuanjia\\data.json with daily backups.
 
-Setup (once):
-    pip install pywebview
-
-Run:
-    python desktop_app.py
+Env vars for testing:
+  SG_DATA_DIR   use this folder instead of %APPDATA%\\ShebeiGuanjia
+  SG_OFFSCREEN  1 = place the window off screen
+  SG_SELFTEST   seconds; quit after that many seconds and print a status line
 """
+import ctypes
+import datetime
+import json
 import os
+import secrets
 import shutil
 import sys
+import threading
+import time
+import urllib.parse
+from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
+
 import webview
 
-# When frozen by PyInstaller, bundled data files (index.html, css/, js/) are
-# extracted to sys._MEIPASS at runtime instead of living next to this script.
-RESOURCE_DIR = getattr(sys, "_MEIPASS", os.path.dirname(os.path.abspath(__file__)))
-INDEX_PATH = os.path.join(RESOURCE_DIR, "index.html")
-
-# The data file lives in the user's per-user AppData folder rather than next
-# to the .exe, so it survives no matter how a new release is installed —
-# overwriting the same .exe in place, or unzipping a fresh copy into a brand
-# new folder. (Falls back to the script/exe folder if APPDATA isn't set,
-# e.g. on non-Windows.)
-if getattr(sys, "frozen", False):
-    _LEGACY_DIR = os.path.dirname(os.path.abspath(sys.executable))
-else:
-    _LEGACY_DIR = os.path.dirname(os.path.abspath(__file__))
-DATA_DIR = os.path.join(os.environ.get("APPDATA", _LEGACY_DIR), "EquipPro")
-DATA_PATH = os.path.join(DATA_DIR, "equippro_data.json")
-_LEGACY_DATA_PATH = os.path.join(_LEGACY_DIR, "equippro_data.json")
+APP_NAME = '設備管家'
+BASE_DIR = getattr(sys, '_MEIPASS', os.path.dirname(os.path.abspath(__file__)))
+WEB_DIR = os.path.join(BASE_DIR, 'web') if getattr(sys, 'frozen', False) else BASE_DIR
+DATA_DIR = os.environ.get('SG_DATA_DIR') or os.path.join(os.environ.get('APPDATA') or os.path.expanduser('~'), 'ShebeiGuanjia')
+DATA_FILE = os.path.join(DATA_DIR, 'data.json')
+PREFS_FILE = os.path.join(DATA_DIR, 'prefs.json')  # sync settings + remembered login
+BACKUP_DIR = os.path.join(DATA_DIR, 'backups')
+TOKEN = secrets.token_urlsafe(24)
+ALLOWED = ('index.html', 'css/', 'js/', 'icons/', 'manifest.webmanifest')
+write_lock = threading.Lock()
+window = None
 
 
-def _migrate_legacy_data():
-    """One-time move of data from the old next-to-the-exe location, so
-    users upgrading from an earlier version don't lose their existing
-    records when this launcher switches to the AppData location."""
-    if os.path.exists(DATA_PATH) or not os.path.exists(_LEGACY_DATA_PATH):
-        return
+def read_json(path, default=None):
     try:
-        os.makedirs(DATA_DIR, exist_ok=True)
-        shutil.copy2(_LEGACY_DATA_PATH, DATA_PATH)
-    except OSError as e:
-        print(f"[警告] 搬移舊資料檔失敗：{e}")
+        with open(path, encoding='utf-8') as f:
+            return json.load(f)
+    except (OSError, ValueError):
+        return default
 
 
-WINDOW_TITLE = "EquipPro — 企業級設備更換紀錄與價位管理系統"
+def write_atomic(path, text):
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    tmp = path + '.tmp'
+    with open(tmp, 'w', encoding='utf-8') as f:
+        f.write(text)
+        f.flush()
+        os.fsync(f.fileno())
+    os.replace(tmp, path)
 
 
-class Api:
-    """Exposed to the page as window.pywebview.api — see js/storage.js."""
+def save_db(text):
+    json.loads(text)  # refuse to store anything that is not valid JSON
+    with write_lock:
+        write_atomic(DATA_FILE, text)
+        daily_backup()
 
-    def load_data(self):
-        if not os.path.exists(DATA_PATH):
-            return "{}"
+
+def daily_backup():
+    """One copy per day, newest 30 kept."""
+    os.makedirs(BACKUP_DIR, exist_ok=True)
+    name = os.path.join(BACKUP_DIR, f'data_{datetime.date.today():%Y%m%d}.json')
+    if not os.path.exists(name):
+        shutil.copyfile(DATA_FILE, name)
+        old = sorted(f for f in os.listdir(BACKUP_DIR) if f.startswith('data_'))
+        for f in old[:-30]:
+            try:
+                os.remove(os.path.join(BACKUP_DIR, f))
+            except OSError:
+                pass
+
+
+class Handler(SimpleHTTPRequestHandler):
+    def __init__(self, *a, **kw):
+        super().__init__(*a, directory=WEB_DIR, **kw)
+
+    def log_message(self, *a):
+        pass
+
+    def end_headers(self):
+        self.send_header('Cache-Control', 'no-store')
+        super().end_headers()
+
+    def _authorized(self):
+        q = urllib.parse.parse_qs(urllib.parse.urlparse(self.path).query)
+        return secrets.compare_digest(self.headers.get('X-SG-Token', '') or (q.get('t') or [''])[0], TOKEN)
+
+    def _json(self, obj, code=200):
+        body = json.dumps(obj, ensure_ascii=False).encode('utf-8')
+        self.send_response(code)
+        self.send_header('Content-Type', 'application/json; charset=utf-8')
+        self.send_header('Content-Length', str(len(body)))
+        self.end_headers()
+        self.wfile.write(body)
+
+    def _body(self):
+        n = int(self.headers.get('Content-Length') or 0)
+        return self.rfile.read(n).decode('utf-8') if n else ''
+
+    def do_GET(self):
+        path = urllib.parse.urlparse(self.path).path
+        if path.startswith('/api/'):
+            if not self._authorized():
+                return self._json({'ok': False}, 403)
+            if path == '/api/db':
+                return self._json({'ok': True, 'db': read_json(DATA_FILE), 'prefs': read_json(PREFS_FILE, {}), 'path': DATA_DIR})
+            return self._json({'ok': False}, 404)
+        rel = path.lstrip('/') or 'index.html'
+        if not rel.startswith(ALLOWED):
+            return self._json({'ok': False}, 404)
+        return super().do_GET()
+
+    def do_POST(self):
+        path = urllib.parse.urlparse(self.path).path
+        if not self._authorized():
+            return self._json({'ok': False}, 403)
         try:
-            with open(DATA_PATH, "r", encoding="utf-8") as f:
-                return f.read()
-        except OSError as e:
-            print(f"[警告] 讀取資料檔失敗：{e}")
-            return "{}"
+            if path == '/api/db':
+                save_db(self._body())
+                return self._json({'ok': True})
+            if path == '/api/prefs':
+                prefs = json.loads(self._body() or '{}')
+                with write_lock:
+                    write_atomic(PREFS_FILE, json.dumps(prefs, ensure_ascii=False))
+                return self._json({'ok': True})
+            if path == '/api/savefile':
+                q = urllib.parse.parse_qs(urllib.parse.urlparse(self.path).query)
+                name = os.path.basename((q.get('name') or ['export.csv'])[0]) or 'export.csv'
+                text = self._body()
+                ext = os.path.splitext(name)[1].lower()
+                types = ('CSV 檔 (*.csv)', '所有檔案 (*.*)') if ext == '.csv' else ('JSON 檔 (*.json)', '所有檔案 (*.*)')
+                res = window.create_file_dialog(webview.FileDialog.SAVE, directory=os.path.join(os.path.expanduser('~'), 'Documents'),
+                                                save_filename=name, file_types=types)
+                if not res:
+                    return self._json({'ok': False, 'cancelled': True})
+                target = res if isinstance(res, str) else res[0]
+                with open(target, 'w', encoding='utf-8', newline='') as f:
+                    f.write(text)
+                return self._json({'ok': True, 'path': target})
+        except Exception as e:  # report instead of dropping the connection
+            return self._json({'ok': False, 'error': str(e)}, 500)
+        return self._json({'ok': False}, 404)
 
-    def save_data(self, data_json):
-        # Write to a temp file then atomically replace the real one, so an
-        # overlapping call (JS can fire several saves back-to-back) can never
-        # leave the data file with interleaved, corrupted content — each
-        # write either fully lands or doesn't touch the file at all.
-        tmp_path = DATA_PATH + ".tmp"
-        try:
-            os.makedirs(DATA_DIR, exist_ok=True)
-            with open(tmp_path, "w", encoding="utf-8") as f:
-                f.write(data_json)
-            os.replace(tmp_path, DATA_PATH)
-            return True
-        except OSError as e:
-            print(f"[警告] 寫入資料檔失敗：{e}")
-            return False
+
+def single_instance():
+    """Returns False if another copy is already running."""
+    if os.name != 'nt' or os.environ.get('SG_SELFTEST'):
+        return True
+    ctypes.windll.kernel32.CreateMutexW(None, False, 'ShebeiGuanjia_SingleInstance')
+    if ctypes.windll.kernel32.GetLastError() == 183:  # ERROR_ALREADY_EXISTS
+        ctypes.windll.user32.MessageBoxW(None, '設備管家已經開啟了，請到工作列切換視窗。', APP_NAME, 0x40)
+        return False
+    return True
+
+
+def selftest(win, seconds):
+    time.sleep(seconds)
+    try:
+        status = win.evaluate_js("JSON.stringify({splash: !!document.getElementById('splash'), app: document.getElementById('app').innerHTML.length,"
+                                 " desktop: !!(window.SG && SG.desktop), title: document.title})")
+    except Exception as e:
+        status = 'ERR ' + str(e)
+    print('SELFTEST', status, flush=True)
+    win.destroy()
 
 
 def main():
-    _migrate_legacy_data()
+    global window
+    if not single_instance():
+        return
+    os.makedirs(DATA_DIR, exist_ok=True)
+    server = ThreadingHTTPServer(('127.0.0.1', 0), Handler)
+    server.daemon_threads = True
+    threading.Thread(target=server.serve_forever, daemon=True).start()
+    url = f'http://127.0.0.1:{server.server_address[1]}/index.html?desktop=1&t={TOKEN}'
+    kw = dict(width=1320, height=860, min_size=(380, 560), text_select=True)
+    if os.environ.get('SG_OFFSCREEN'):
+        kw.update(x=-4000, y=-4000)
+    window = webview.create_window(APP_NAME, url, **kw)
+    st = os.environ.get('SG_SELFTEST')
+    # Private mode: data lives in DATA_FILE/PREFS_FILE, and a fresh browser
+    # profile avoids "resource in use" errors when the app is reopened quickly.
+    webview.start(selftest if st else None, (window, float(st)) if st else None, private_mode=True)
+    server.shutdown()
 
-    if not os.path.exists(INDEX_PATH):
-        print(f"[錯誤] 找不到 index.html：{INDEX_PATH}")
-        sys.exit(1)
 
-    webview.create_window(
-        title=WINDOW_TITLE,
-        url=INDEX_PATH,
-        width=1360,
-        height=860,
-        min_size=(960, 600),
-        text_select=True,
-        js_api=Api(),
-        maximized=True,  # auto-fit the current screen on launch; user can still un-maximize
-    )
-    webview.start()
-
-
-if __name__ == "__main__":
+if __name__ == '__main__':
     main()

@@ -1,63 +1,43 @@
 /**
- * EquipPro 雲端同步後端 (Google Apps Script)
+ * 設備管家 — cloud backend (Google Apps Script web app bound to a spreadsheet).
  *
- * 安裝：
- *   1. 建立一個新的 Google 試算表 → 擴充功能 → Apps Script
- *   2. 把本檔內容貼到 Code.gs 並儲存
- *   3. 部署 → 新增部署作業 → 類型「網頁應用程式」
- *      執行身分：我；誰可以存取：所有人 → 部署並授權
- *   4. 複製「網頁應用程式網址」（結尾是 /exec），貼到 EquipPro「系統設定 → 雲端同步」
- *   第一次連線時輸入的同步密碼會成為這個後端的密碼（之後所有裝置都要用同一組）。
+ * Sheet "records": one row per record
+ *   A collection | B id | C updatedAt | D deleted | E rev | F.. JSON (split into 45k-char cells)
+ * Every write gets a new server revision number (REV). Clients send their
+ * changes plus the last REV they saw and receive everything newer.
+ * Conflicts: the record with the larger updatedAt wins.
  *
- * 資料表「records」每列一筆紀錄：
- *   c（集合）| id | ts（修改時間）| rev（伺服器版本號）| deleted | n（JSON 分段數）| JSON 分段…
- * JSON 會切成多格存放，避開單一儲存格 5 萬字的上限（照片是 base64，較大）。
+ * The first client to call `claim` sets the sync password (stored as a hash).
  */
-
-var SHEET_NAME = 'records';
-var HEADER = ['c', 'id', 'ts', 'rev', 'deleted', 'n'];
-var FIXED_COLS = HEADER.length;
-var CHUNK = 40000;
-// Every stored chunk starts with this marker so Sheets never reads a chunk
-// as a number, date or formula (a JSON fragment can start with "=", "-", digits…).
-var MARK = '~';
-var MAX_PULL_CHARS = 4000000;
-var COLLECTIONS = ['users', 'equipment', 'replacements', 'quotes', 'activity', 'maintenancePlans', 'maintenanceLogs', 'userStats'];
-// The activity log is append-only; keep the newest ACTIVITY_KEEP entries once it passes ACTIVITY_MAX.
-var ACTIVITY_KEEP = 1000;
-var ACTIVITY_MAX = 1500;
-
-// 在編輯器選擇這個函式按「執行」一次，完成授權並建立 records 工作表。
-function setup() {
-  getSheet();
-  Logger.log('EquipPro 雲端後端已就緒');
-}
+var SHEET = 'records';
+var FIXED = 5;
+var CHUNK = 45000;
+var PAGE = 1500;
+var COLLECTIONS = ['users', 'equipment', 'replacements', 'quotes', 'plans', 'logs', 'vendors', 'activity', 'settings'];
+var ACTIVITY_MAX = 3000;
+var ACTIVITY_KEEP = 2000;
 
 function doGet() {
-  return ContentService.createTextOutput('EquipPro 雲端同步後端運作中。請在 EquipPro 的「系統設定 → 雲端同步」貼上本網址。');
+  return out({ ok: true, app: 'shebei-guanjia', claimed: !!props().getProperty('KEY_HASH') });
 }
 
 function doPost(e) {
   var req;
-  try {
-    req = JSON.parse(e.postData.contents);
-  } catch (err) {
-    return out({ ok: false, error: 'BAD_REQUEST', message: '請求格式錯誤' });
-  }
+  try { req = JSON.parse(e.postData.contents); } catch (err) { return out({ ok: false, error: 'BADREQ', message: '請求格式錯誤' }); }
+  var action = req.action;
+  if (action === 'status') return out({ ok: true, claimed: !!props().getProperty('KEY_HASH') });
+
   var lock = LockService.getScriptLock();
-  try {
-    lock.waitLock(30000);
-  } catch (err) {
-    return out({ ok: false, error: 'BUSY', message: '雲端忙碌中（其他裝置正在同步），稍後會自動重試' });
+  try { lock.waitLock(30000); } catch (err) {
+    return out({ ok: false, error: 'BUSY', message: '雲端忙碌中，稍後會自動重試' });
   }
   try {
-    var auth = checkKey(req.key);
-    if (!auth.ok) return out(auth);
-    if (req.action === 'ping') return out(ping(auth.claimed));
-    if (req.action === 'sync') return out(sync(req));
-    return out({ ok: false, error: 'BAD_ACTION', message: '未知的動作' });
+    if (action === 'claim') return out(claim(req));
+    if (!checkKey(req.key)) return out({ ok: false, error: 'BADKEY', message: '同步密碼錯誤' });
+    if (action === 'sync') return out(sync(req));
+    return out({ ok: false, error: 'BADREQ', message: '未知的操作' });
   } catch (err) {
-    return out({ ok: false, error: 'SERVER', message: '雲端處理失敗：' + err });
+    return out({ ok: false, error: 'SERVER', message: '雲端錯誤：' + err.message });
   } finally {
     lock.releaseLock();
   }
@@ -66,157 +46,126 @@ function doPost(e) {
 function out(obj) {
   return ContentService.createTextOutput(JSON.stringify(obj)).setMimeType(ContentService.MimeType.JSON);
 }
-
-function hashKey(key) {
-  var bytes = Utilities.computeDigest(Utilities.DigestAlgorithm.SHA_256, 'equippro:' + key, Utilities.Charset.UTF_8);
-  return bytes.map(function (b) { return ('0' + (b & 0xff).toString(16)).slice(-2); }).join('');
+function props() { return PropertiesService.getScriptProperties(); }
+function hash(s) {
+  var b = Utilities.computeDigest(Utilities.DigestAlgorithm.SHA_256, 'shebei-guanjia:' + s, Utilities.Charset.UTF_8);
+  return b.map(function (x) { return ('0' + (x & 255).toString(16)).slice(-2); }).join('');
 }
-
-// The first client to connect sets the sync password; later requests must match it.
 function checkKey(key) {
-  key = String(key || '');
-  if (key.length < 4) return { ok: false, error: 'AUTH', message: '同步密碼至少 4 個字元' };
-  var props = PropertiesService.getScriptProperties();
-  var stored = props.getProperty('KEY_HASH');
-  if (!stored) {
-    props.setProperty('KEY_HASH', hashKey(key));
-    return { ok: true, claimed: true };
-  }
-  if (stored !== hashKey(key)) return { ok: false, error: 'AUTH', message: '同步密碼錯誤' };
-  return { ok: true, claimed: false };
+  var h = props().getProperty('KEY_HASH');
+  return !!h && typeof key === 'string' && hash(key) === h;
+}
+function claim(req) {
+  if (props().getProperty('KEY_HASH')) return { ok: false, error: 'CLAIMED', message: '雲端已經設定過同步密碼' };
+  if (typeof req.key !== 'string' || req.key.length < 6) return { ok: false, error: 'BADREQ', message: '同步密碼至少 6 個字' };
+  props().setProperty('KEY_HASH', hash(req.key));
+  props().setProperty('REV', '0');
+  sheet();
+  return { ok: true, claimed: true };
 }
 
-function getSheet() {
+function sheet() {
   var ss = SpreadsheetApp.getActiveSpreadsheet();
-  var sh = ss.getSheetByName(SHEET_NAME);
+  var sh = ss.getSheetByName(SHEET);
   if (!sh) {
-    sh = ss.insertSheet(SHEET_NAME);
-    sh.getRange(1, 1, 1, FIXED_COLS).setValues([HEADER]);
+    sh = ss.insertSheet(SHEET);
+    sh.getRange(1, 1, 1, FIXED + 1).setValues([['collection', 'id', 'updatedAt', 'deleted', 'rev', 'json']]);
     sh.setFrozenRows(1);
   }
   return sh;
 }
 
-function currentRev() {
-  return Number(PropertiesService.getScriptProperties().getProperty('REV') || 0);
-}
-
-function ping(claimed) {
-  var sh = getSheet();
-  var counts = {};
+function readFixed(sh) {
   var last = sh.getLastRow();
-  if (last > 1) {
-    sh.getRange(2, 1, last - 1, 5).getValues().forEach(function (r) {
-      if (Number(r[4])) return;
-      counts[r[0]] = (counts[r[0]] || 0) + 1;
-    });
-  }
-  return { ok: true, claimed: !!claimed, rev: currentRev(), counts: counts };
+  if (last < 2) return [];
+  return sh.getRange(2, 1, last - 1, FIXED).getValues();
 }
 
-function readIndex(sh) {
+function sync(req) {
+  var sh = sheet();
+  var fixed = readFixed(sh);
   var index = {};
-  var last = sh.getLastRow();
-  if (last > 1) {
-    sh.getRange(2, 1, last - 1, FIXED_COLS).getValues().forEach(function (r, i) {
-      index[r[0] + '|' + r[1]] = { row: i + 2, ts: Number(r[2]), rev: Number(r[3]), n: Number(r[5]) || 0 };
+  fixed.forEach(function (r, i) { index[r[0] + '/' + r[1]] = i; });
+  var rev = Number(props().getProperty('REV') || 0);
+  var changes = Array.isArray(req.changes) ? req.changes : [];
+  var appends = [];
+  var accepted = 0;
+
+  changes.forEach(function (ch) {
+    if (!ch || COLLECTIONS.indexOf(ch.c) < 0 || !ch.id || typeof ch.j !== 'string') return;
+    var key = ch.c + '/' + ch.id;
+    var u = Number(ch.u) || 0;
+    var at = index[key];
+    if (at !== undefined && Number(fixed[at][2]) >= u) return; // ours is newer or equal
+    rev++;
+    accepted++;
+    var row = [ch.c, String(ch.id), u, ch.d ? 1 : 0, rev].concat(chunk(ch.j));
+    if (at !== undefined) {
+      var width = Math.max(sh.getLastColumn(), row.length);
+      while (row.length < width) row.push('');
+      sh.getRange(at + 2, 1, 1, row.length).setValues([row]);
+      fixed[at] = row.slice(0, FIXED);
+    } else {
+      index[key] = fixed.length + appends.length;
+      appends.push(row);
+    }
+  });
+  if (appends.length) {
+    var w = appends.reduce(function (m, r) { return Math.max(m, r.length); }, FIXED + 1);
+    appends.forEach(function (r) { while (r.length < w) r.push(''); });
+    sh.getRange(sh.getLastRow() + 1, 1, appends.length, w).setValues(appends);
+    appends.forEach(function (r) { fixed.push(r.slice(0, FIXED)); });
+  }
+  if (accepted) props().setProperty('REV', String(rev));
+  if (accepted && pruneActivity(sh)) fixed = readFixed(sh);
+
+  // Everything newer than what the client has seen, oldest first, one page at a time.
+  var since = Number(req.since) || 0;
+  var newer = [];
+  fixed.forEach(function (r, i) { if (Number(r[4]) > since) newer.push(i); });
+  newer.sort(function (a, b) { return Number(fixed[a][4]) - Number(fixed[b][4]); });
+  var more = newer.length > PAGE;
+  if (more) newer = newer.slice(0, PAGE);
+  var rows = [];
+  if (newer.length) {
+    var width = sh.getLastColumn();
+    var data = sh.getRange(2, 1, fixed.length, width).getValues();
+    newer.forEach(function (i) {
+      var r = data[i];
+      rows.push({ c: r[0], id: String(r[1]), u: Number(r[2]), d: Number(r[3]), j: r.slice(FIXED).join('').replace(/^~/, '') });
     });
   }
-  return index;
+  var lastRev = more ? Number(fixed[newer[newer.length - 1]][4]) : rev;
+  return { ok: true, rev: lastRev, more: more, accepted: accepted, rows: rows };
 }
 
-// Drops the oldest activity rows once there are more than ACTIVITY_MAX, by
-// rewriting the sheet without them (rare: about once per 500 new entries).
-// Devices keep their own copies; they only cap theirs locally.
+// A leading "~" keeps Sheets from reading JSON-looking text as a number/date.
+function chunk(s) {
+  s = '~' + s;
+  var parts = [];
+  for (var i = 0; i < s.length; i += CHUNK) parts.push(s.slice(i, i + CHUNK));
+  return parts;
+}
+
+// Keeps only the newest ACTIVITY_KEEP activity rows once there are more than ACTIVITY_MAX.
 function pruneActivity(sh) {
-  var last = sh.getLastRow();
-  if (last < 2) return false;
-  var fixed = sh.getRange(2, 1, last - 1, FIXED_COLS).getValues();
+  var fixed = readFixed(sh);
   var act = [];
-  fixed.forEach(function (r, i) { if (r[0] === 'activity') act.push({ i: i, ts: Number(r[2]) }); });
+  fixed.forEach(function (r, i) { if (r[0] === 'activity') act.push({ i: i, u: Number(r[2]) }); });
   if (act.length <= ACTIVITY_MAX) return false;
-  act.sort(function (a, b) { return a.ts - b.ts; });
+  act.sort(function (a, b) { return a.u - b.u; });
   var drop = {};
   act.slice(0, act.length - ACTIVITY_KEEP).forEach(function (a) { drop[a.i] = true; });
-  var data = sh.getDataRange().getValues();
-  var width = data[0].length;
-  var keep = data.slice(1).filter(function (r, i) { return !drop[i]; });
-  sh.getRange(2, 1, last - 1, width).clearContent();
+  var width = sh.getLastColumn();
+  var data = sh.getRange(2, 1, fixed.length, width).getValues();
+  var keep = data.filter(function (r, i) { return !drop[i]; });
+  sh.getRange(2, 1, fixed.length, width).clearContent();
   if (keep.length) sh.getRange(2, 1, keep.length, width).setValues(keep);
   return true;
 }
 
-function sync(req) {
-  var sh = getSheet();
-  var props = PropertiesService.getScriptProperties();
-  var rev = currentRev();
-  var index = readIndex(sh);
-  var rejected = [];
-  var appends = [];
-  var changes = Array.isArray(req.changes) ? req.changes : [];
-
-  changes.forEach(function (ch) {
-    if (!ch || COLLECTIONS.indexOf(ch.c) === -1 || !ch.id) return;
-    var key = ch.c + '|' + ch.id;
-    var ts = Number(ch.ts) || 0;
-    var existing = index[key];
-    if (existing && existing.ts > ts) { rejected.push(key); return; }
-    rev++;
-    var json = ch.deleted ? '' : JSON.stringify(ch.data);
-    var chunks = [];
-    for (var p = 0; p < json.length; p += CHUNK) chunks.push(MARK + json.substr(p, CHUNK));
-    var row = [ch.c, String(ch.id), ts, rev, ch.deleted ? 1 : 0, chunks.length].concat(chunks);
-    if (existing) {
-      sh.getRange(existing.row, 1, 1, row.length).setValues([row]);
-      if (existing.n > chunks.length) {
-        sh.getRange(existing.row, FIXED_COLS + chunks.length + 1, 1, existing.n - chunks.length).clearContent();
-      }
-      existing.ts = ts; existing.rev = rev; existing.n = chunks.length;
-    } else {
-      appends.push(row);
-      index[key] = { row: -1, ts: ts, rev: rev, n: chunks.length };
-    }
-  });
-  if (appends.length) {
-    var start = sh.getLastRow() + 1;
-    var width = appends.reduce(function (m, r) { return Math.max(m, r.length); }, FIXED_COLS);
-    var padded = appends.map(function (r) { while (r.length < width) r.push(''); return r; });
-    sh.getRange(start, 1, padded.length, width).setValues(padded);
-    padded.forEach(function (r, i) { index[r[0] + '|' + r[1]].row = start + i; });
-  }
-  props.setProperty('REV', String(rev));
-  if (pruneActivity(sh)) index = readIndex(sh);
-
-  // Pull: everything newer than the client's cursor (plus the server copy of
-  // anything we rejected), oldest first, capped per response.
-  var since = Number(req.since) || 0;
-  var wanted = [];
-  Object.keys(index).forEach(function (k) {
-    var it = index[k];
-    if (it.rev > since || rejected.indexOf(k) !== -1) wanted.push(it);
-  });
-  wanted.sort(function (a, b) { return a.rev - b.rev; });
-
-  var rows = [];
-  var more = false;
-  var cursor = rev;
-  if (wanted.length) {
-    var data = sh.getDataRange().getValues();
-    var chars = 0;
-    for (var i = 0; i < wanted.length; i++) {
-      var r = data[wanted[i].row - 1];
-      var n = Number(r[5]) || 0;
-      var json = '';
-      for (var j = 0; j < n; j++) json += String(r[FIXED_COLS + j]).substr(MARK.length);
-      if (rows.length && chars + json.length > MAX_PULL_CHARS && wanted[i].rev > since) {
-        more = true;
-        cursor = Math.max(since, wanted[i - 1].rev);
-        break;
-      }
-      chars += json.length;
-      var deleted = !!Number(r[4]);
-      rows.push({ c: r[0], id: String(r[1]), ts: Number(r[2]), rev: Number(r[3]), deleted: deleted, data: deleted || !json ? null : JSON.parse(json) });
-    }
-  }
-  return { ok: true, rows: rows, cursor: cursor, more: more, rejected: rejected };
+/** Run once from the editor to authorize spreadsheet access. */
+function setup() {
+  sheet();
+  Logger.log('ready; claimed=' + !!props().getProperty('KEY_HASH'));
 }

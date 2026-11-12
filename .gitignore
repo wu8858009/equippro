@@ -1,11 +1,5 @@
-.DS_Store
-Thumbs.db
-node_modules/
-*.log
-__pycache__/
-*.pyc
 build/
 dist/
-*.spec
-equippro_data.json
+__pycache__/
 .clasp.json
+*.pyc
