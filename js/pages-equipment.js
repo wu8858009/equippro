@@ -269,6 +269,14 @@
   };
 
   // ====================================================== dashboard
+  function greeting() {
+    const h = new Date().getHours();
+    return h < 5 ? '夜深了' : h < 11 ? '早安' : h < 14 ? '午安' : h < 18 ? '下午好' : '晚安';
+  }
+  function todayLabel() {
+    const d = new Date();
+    return `${d.getFullYear()} 年 ${d.getMonth() + 1} 月 ${d.getDate()} 日・星期${'日一二三四五六'[d.getDay()]}`;
+  }
   UI.route('/dash', function (main) {
     const eqs = Q.eqs();
     const active = eqs.filter((e) => e.status !== '已汰換');
@@ -298,7 +306,27 @@
 
     const kpi = (icon, label, val, href, cls = '') => `<a class="kpi ${cls}" href="${href}"><span class="kpi-icon">${icon}</span><span class="kpi-val">${val}</span><span class="kpi-lab">${label}</span></a>`;
     main.innerHTML = `
-      ${UI.pageHead('總覽', `<button class="btn" data-scan>📷 掃描 QR</button><button class="btn" id="d-repair">🛠️ 我要報修</button>${canEdit() ? `<button class="btn primary" id="d-add">＋ 新增設備</button>` : ''}`, `${esc(DB.settings().orgName)}${Q.curStore() ? '・' + esc(Q.curStore()) : ''}・${U.today()}`)}
+      <h1 class="sr-only">總覽</h1>
+      <section class="hero">
+        <div class="hero-top">
+          <div>
+            <div class="tag">⭐ 設備管家 PRO・企業版</div>
+            <h1>${greeting()}，${esc(Auth.current.name)}</h1>
+            <p>${esc(DB.settings().orgName)}${Q.curStore() ? '・' + esc(Q.curStore()) : ''}・${todayLabel()}</p>
+          </div>
+          <div class="hero-actions">
+            <button class="btn" data-scan>📷 掃描 QR</button>
+            <button class="btn" id="d-repair">🛠️ 我要報修</button>
+            ${canEdit() ? `<button class="btn primary" id="d-add">＋ 新增設備</button>` : ''}
+          </div>
+        </div>
+        <div class="hero-stats">
+          <div><b>${active.length}</b><span>管理中設備</span></div>
+          <div><b>${repairs.length}</b><span>待處理報修</span></div>
+          <div><b>${due.length}</b><span>待辦保養</span></div>
+          <div><b>${U.money(yearSum)}</b><span>${y} 年累計支出</span></div>
+        </div>
+      </section>
       <div class="kpis">
         ${kpi('🧰', '待處理報修', repairs.length, '#/repairs', repairs.some((r) => r.urgency === '緊急') ? 'danger' : repairs.length ? 'warn' : '')}
         ${kpi('🗄️', '使用中設備', active.filter((e) => e.status === '使用中').length, '#/equipment')}

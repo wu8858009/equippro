@@ -24,7 +24,7 @@ from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
 
 import webview
 
-APP_NAME = '設備管家'
+APP_NAME = '設備管家 PRO'
 BASE_DIR = getattr(sys, '_MEIPASS', os.path.dirname(os.path.abspath(__file__)))
 WEB_DIR = os.path.join(BASE_DIR, 'web') if getattr(sys, 'frozen', False) else BASE_DIR
 DATA_DIR = os.environ.get('SG_DATA_DIR') or os.path.join(os.environ.get('APPDATA') or os.path.expanduser('~'), 'ShebeiGuanjia')

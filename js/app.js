@@ -61,9 +61,23 @@
 
   // ------------------------------------------------------------ auth screens
   function authScreen(inner) {
-    root().innerHTML = `<div class="auth"><div class="auth-card">
-      <div class="auth-logo"><img src="icons/icon-192.png" alt=""><div><h1>設備管家</h1><p>${esc(DB.settings().orgName !== '設備管家' ? DB.settings().orgName : '設備・更換・報價・保養 一次管理')}</p></div></div>
-      ${inner}</div></div>`;
+    const org = DB.settings().orgName;
+    root().innerHTML = `<div class="auth"><div class="auth-shell">
+      <div class="auth-hero">
+        <img src="icons/icon-192.png" alt="">
+        <h1>設備管家 <i class="pro">PRO</i></h1>
+        <div class="ent">ENTERPRISE EDITION・企業版</div>
+        ${org !== '設備管家' ? `<p style="margin:14px 0 0;opacity:.9">${esc(org)}</p>` : ''}
+        <ul>
+          <li><span>🗄️</span>設備履歷、照片、保固與汰換提醒</li>
+          <li><span>🧰</span>報修派工、保養排程、耗材自動扣庫存</li>
+          <li><span>💰</span>報價比價（含稅／未稅）與支出報表</li>
+          <li><span>☁️</span>電腦、平板、手機雲端即時同步</li>
+        </ul>
+      </div>
+      <div class="auth-card">
+        <div class="auth-logo"><img src="icons/icon-192.png" alt=""><div><h1>設備管家 <i class="pro">PRO</i></h1><p>${esc(org !== '設備管家' ? org : '設備・更換・報價・保養 一次管理')}</p></div></div>
+        ${inner}</div></div></div>`;
   }
 
   function showSetup() {
@@ -203,14 +217,14 @@
       const link = ([h, i, l, m]) => `<a href="${h}" data-match="${m}"><span>${i}</span>${l}${h === '#/repairs' ? '<b class="nav-count" hidden></b>' : ''}</a>`;
       root().innerHTML = `
         <aside class="side">
-          <div class="brand"><img src="icons/icon-192.png" alt=""><div><b>設備管家</b><small id="org-name">${esc(DB.settings().orgName)}</small></div></div>
+          <div class="brand"><img src="icons/icon-192.png" alt=""><div><b>設備管家<i class="pro">PRO</i></b><small id="org-name">${esc(DB.settings().orgName)}</small></div></div>
           ${storeSel('store-side')}
           <form class="side-search" id="side-search"><input type="search" placeholder="🔍 搜尋（Ctrl+K）" aria-label="全站搜尋"><button type="button" class="icon-btn" data-scan title="掃描 QR Code">📷</button></form>
           <nav class="nav">${items.map(link).join('')}</nav>
-          <div class="side-foot"><div class="me">👤 ${esc(me.name)} <small>${esc(Auth.ROLES[me.role])}</small></div><div id="sync-pill"></div></div>
+          <div class="side-foot"><a class="me" href="#/settings" title="${esc(me.name)}"><span class="avatar">${esc((me.name || '?').trim().charAt(0))}</span><div><b>${esc(me.name)}</b><small>${esc(Auth.ROLES[me.role])}</small></div></a><div id="sync-pill"></div></div>
         </aside>
         <header class="topbar">
-          <div class="brand"><img src="icons/icon-192.png" alt=""><b>設備管家</b></div>
+          <div class="brand"><img src="icons/icon-192.png" alt=""><b>設備管家<i class="pro">PRO</i></b></div>
           <div class="top-right">${storeSel('store-top')}<button class="icon-btn top-search" data-scan aria-label="掃描 QR Code">📷</button><a href="#/search" class="icon-btn top-search" aria-label="搜尋">🔍</a><span id="sync-pill-m"></span></div>
         </header>
         <main id="main"></main>

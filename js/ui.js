@@ -209,6 +209,10 @@
       catch (e) { console.error(e); main.innerHTML = `<div class="card">頁面發生錯誤：${esc(e.message)}</div>`; }
       if (keepScroll) window.scrollTo(0, y); else window.scrollTo(0, 0);
       UI.$$('.chart-scroll', main).forEach((el) => (el.scrollLeft = el.scrollWidth)); // newest months in view
+      if (!keepScroll) {
+        main.classList.remove('enter'); void main.offsetWidth; main.classList.add('enter');
+        UI.countUp(main);
+      }
       UI._lastPath = scrollKey;
       const t = UI.$('h1', main);
       document.title = (t ? t.textContent.trim() + ' · ' : '') + SG.db.settings().orgName;
@@ -217,6 +221,25 @@
     UI.go('#/dash');
   };
   window.addEventListener('hashchange', () => UI.render());
+
+  // KPI numbers roll up from 0 when a page opens ("NT$ 9,700", "12").
+  UI.countUp = function (root) {
+    if (window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches) return;
+    UI.$$('.kpi-val, .hero-stats b', root).forEach((el) => {
+      const m = /^(\D*?)([\d,]+)(\D*)$/.exec(el.textContent.trim());
+      if (!m) return;
+      const target = Number(m[2].replace(/,/g, ''));
+      if (!target) return;
+      const t0 = performance.now(), dur = 650;
+      const step = (now) => {
+        const p = Math.min(1, (now - t0) / dur);
+        const v = Math.round(target * (1 - Math.pow(1 - p, 3)));
+        el.textContent = m[1] + v.toLocaleString('zh-TW') + m[3];
+        if (p < 1 && el.isConnected) requestAnimationFrame(step);
+      };
+      requestAnimationFrame(step);
+    });
+  };
 
   UI.pageHead = (title, actionsHtml = '', sub = '') =>
     `<div class="page-head"><div><h1>${esc(title)}</h1>${sub ? `<p class="sub">${sub}</p>` : ''}</div><div class="page-actions">${actionsHtml}</div></div>`;
