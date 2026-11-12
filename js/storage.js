@@ -14,6 +14,7 @@
     reminderDismissed: PREFIX + 'reminder_dismissed',
     maintenancePlans: PREFIX + 'maintenance_plans',
     maintenanceLogs: PREFIX + 'maintenance_logs',
+    userStats: PREFIX + 'user_stats',
     settings: PREFIX + 'settings',
     syncConfig: PREFIX + 'sync_config',
     syncMeta: PREFIX + 'sync_meta',
@@ -29,7 +30,8 @@
     quotes: KEYS.quotes,
     activity: KEYS.activity,
     maintenancePlans: KEYS.maintenancePlans,
-    maintenanceLogs: KEYS.maintenanceLogs
+    maintenanceLogs: KEYS.maintenanceLogs,
+    userStats: KEYS.userStats
   };
   const SYNCED_BY_KEY = {};
   Object.keys(SYNCED).forEach((c) => { SYNCED_BY_KEY[SYNCED[c]] = c; });

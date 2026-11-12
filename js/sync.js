@@ -163,14 +163,17 @@
       }
       const res = await call({ action: 'sync', since: m.cursor, changes: batch });
       const m2 = meta();
+      const before = JSON.stringify(m2);
       batch.forEach(ch => {
         const k = ch.c + '|' + ch.id;
         if (m2.outbox[k] && m2.outbox[k].ts === ch.ts) delete m2.outbox[k];
       });
       applied += applyRows(res.rows, m2);
       if (typeof res.cursor === 'number') m2.cursor = res.cursor;
-      m2.lastSync = Date.now();
-      saveMeta(m2);
+      delete m2.lastSync;
+      // An idle poll changes nothing; skip the write (on the desktop every
+      // write also rewrites the whole data file).
+      if (JSON.stringify(m2) !== before) saveMeta(m2);
       if (!res.more && !Object.keys(m2.outbox).length) break;
       if (!res.more && !batch.length) break;
     }
@@ -192,7 +195,7 @@
         setState('idle');
       } catch (e) {
         console.error('雲端同步失敗', e);
-        setState(e.code === 'NETWORK' ? 'offline' : 'error', e.message);
+        setState(e.code === 'NETWORK' || e.code === 'BUSY' ? 'offline' : 'error', e.message);
       } finally {
         running = null;
       }
@@ -225,6 +228,12 @@
 
   async function test(url, key) {
     return call({ action: 'ping' }, { url: normalizeUrl(url), key: String(key || '') });
+  }
+
+  // Records in the cloud, not counting the activity log.
+  function cloudRecordCount(info) {
+    const counts = (info && info.counts) || {};
+    return Object.keys(counts).filter(c => c !== 'activity').reduce((t, c) => t + (counts[c] || 0), 0);
   }
 
   // mode 'merge': keep this device's data and upload all of it.
@@ -278,6 +287,6 @@
 
   window.EPM.sync = {
     state, config, isEnabled, pendingCount, onLocalWrite, syncNow, schedule, start,
-    test, connect, disable, connectLink, decodeConnect
+    test, connect, disable, connectLink, decodeConnect, cloudRecordCount
   };
 })();

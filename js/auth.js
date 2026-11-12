@@ -17,9 +17,48 @@
   const LOGIN_LOCK_THRESHOLD = 5;
   const LOGIN_LOCK_DURATION_MS = 15 * 60 * 1000;
 
-  function getUsers() { return S.read(S.KEYS.users, []); }
-  function saveUsers(list) { S.write(S.KEYS.users, list); }
-  function hasUsers() { return getUsers().length > 0; }
+  // Login bookkeeping (last login, failed attempts, lockout) is kept in a
+  // separate userStats record per user. A login then never rewrites the
+  // account record itself, so with cloud sync a login on a device holding a
+  // stale copy cannot undo a password, role or active change made elsewhere.
+  const STAT_FIELDS = ['lastLoginAt', 'failedAttempts', 'lockedUntil'];
+  function readStats() { return S.read(S.KEYS.userStats, []); }
+  function statsFor(user) {
+    const st = readStats().find(x => x.id === user.id);
+    // Accounts saved before userStats existed carry the fields themselves.
+    return st || { id: user.id, lastLoginAt: user.lastLoginAt || null, failedAttempts: user.failedAttempts || 0, lockedUntil: user.lockedUntil || null };
+  }
+  function saveStats(userId, patch) {
+    const all = readStats();
+    const idx = all.findIndex(x => x.id === userId);
+    const user = rawUsers().find(u => u.id === userId);
+    const base = idx >= 0 ? all[idx] : (user ? statsFor(user) : { id: userId });
+    const next = { ...base, ...patch, id: userId };
+    if (idx >= 0) all[idx] = next; else all.push(next);
+    S.write(S.KEYS.userStats, all);
+  }
+
+  function rawUsers() { return S.read(S.KEYS.users, []); }
+  // Accounts with their login bookkeeping merged in (read-only view).
+  function getUsers() {
+    const stats = readStats();
+    return rawUsers().map(u => {
+      const st = stats.find(x => x.id === u.id);
+      if (!st) return u;
+      const merged = { ...u };
+      STAT_FIELDS.forEach(k => { merged[k] = st[k]; });
+      return merged;
+    });
+  }
+  function saveUsers(list) {
+    // Strip the bookkeeping fields so they never travel inside the account record.
+    S.write(S.KEYS.users, list.map(u => {
+      const clean = { ...u };
+      STAT_FIELDS.forEach(k => { delete clean[k]; });
+      return clean;
+    }));
+  }
+  function hasUsers() { return rawUsers().length > 0; }
 
   function hasModuleAccess(moduleKey, user) {
     if (!MODULES.some(m => m.key === moduleKey)) return true;
@@ -34,30 +73,25 @@
   }
 
   function login(username, password) {
-    const users = getUsers();
-    const user = users.find(u => u.username === String(username || '').trim());
+    const user = rawUsers().find(u => u.username === String(username || '').trim());
     if (!user) return { ok: false, message: '帳號不存在' };
     if (!user.active) return { ok: false, message: '此帳號已被停用，請聯絡管理員' };
-    if (user.lockedUntil && Date.now() < user.lockedUntil) {
-      const mins = Math.max(1, Math.ceil((user.lockedUntil - Date.now()) / 60000));
+    const st = statsFor(user);
+    if (st.lockedUntil && Date.now() < st.lockedUntil) {
+      const mins = Math.max(1, Math.ceil((st.lockedUntil - Date.now()) / 60000));
       return { ok: false, message: `密碼錯誤次數過多，帳號已鎖定，請於約 ${mins} 分鐘後再試` };
     }
     if (user.passwordHash !== S.simpleHash(password || '')) {
-      user.failedAttempts = (user.failedAttempts || 0) + 1;
-      if (user.failedAttempts >= LOGIN_LOCK_THRESHOLD) {
-        user.lockedUntil = Date.now() + LOGIN_LOCK_DURATION_MS;
-        user.failedAttempts = 0;
-        saveUsers(users);
+      const failed = (st.failedAttempts || 0) + 1;
+      if (failed >= LOGIN_LOCK_THRESHOLD) {
+        saveStats(user.id, { failedAttempts: 0, lockedUntil: Date.now() + LOGIN_LOCK_DURATION_MS });
         logActivity('帳號鎖定', user.username, `連續輸入錯誤密碼達 ${LOGIN_LOCK_THRESHOLD} 次`, user);
         return { ok: false, message: '密碼錯誤次數過多，帳號已暫時鎖定' };
       }
-      saveUsers(users);
+      saveStats(user.id, { failedAttempts: failed });
       return { ok: false, message: '密碼錯誤' };
     }
-    user.failedAttempts = 0;
-    user.lockedUntil = null;
-    user.lastLoginAt = Date.now();
-    saveUsers(users);
+    saveStats(user.id, { failedAttempts: 0, lockedUntil: null, lastLoginAt: Date.now() });
     S.write(S.KEYS.session, { userId: user.id, loginAt: Date.now() });
     logActivity('登入系統', '-', '使用者登入', user);
     return { ok: true, user };
@@ -72,7 +106,7 @@
   function getCurrentUser() {
     const session = S.read(S.KEYS.session, null);
     if (!session) return null;
-    return getUsers().find(u => u.id === session.userId) || null;
+    return rawUsers().find(u => u.id === session.userId) || null;
   }
 
   function isAdmin() {
@@ -81,7 +115,7 @@
   }
 
   function createUser({ username, password, name, role, modules }) {
-    const users = getUsers();
+    const users = rawUsers();
     username = String(username || '').trim();
     if (!username || !password) return { ok: false, message: '帳號與密碼為必填' };
     if (users.some(u => u.username === username)) return { ok: false, message: '帳號已存在' };
@@ -89,8 +123,7 @@
       id: S.uid('u'), username, passwordHash: S.simpleHash(password),
       name: (name || '').trim() || username, role: role === 'admin' ? 'admin' : 'staff',
       modules: Array.isArray(modules) ? modules : DEFAULT_MODULES.slice(), modulesV2: true,
-      active: true, createdAt: Date.now(),
-      lastLoginAt: null, failedAttempts: 0, lockedUntil: null
+      active: true, createdAt: Date.now()
     };
     users.push(user);
     saveUsers(users);
@@ -99,7 +132,7 @@
   }
 
   function updateUser(id, patch) {
-    const users = getUsers();
+    const users = rawUsers();
     const idx = users.findIndex(u => u.id === id);
     if (idx === -1) return { ok: false, message: '找不到使用者' };
     patch = { ...patch };
@@ -119,18 +152,15 @@
   }
 
   function unlockUser(id) {
-    const users = getUsers();
-    const idx = users.findIndex(u => u.id === id);
-    if (idx === -1) return { ok: false, message: '找不到使用者' };
-    users[idx].failedAttempts = 0;
-    users[idx].lockedUntil = null;
-    saveUsers(users);
-    logActivity('解除帳號鎖定', users[idx].username, '-');
-    return { ok: true, user: users[idx] };
+    const user = rawUsers().find(u => u.id === id);
+    if (!user) return { ok: false, message: '找不到使用者' };
+    saveStats(id, { failedAttempts: 0, lockedUntil: null });
+    logActivity('解除帳號鎖定', user.username, '-');
+    return { ok: true, user };
   }
 
   function deleteUser(id) {
-    let users = getUsers();
+    let users = rawUsers();
     const target = users.find(u => u.id === id);
     if (!target) return { ok: false, message: '找不到使用者' };
     if (target.role === 'admin' && users.filter(u => u.role === 'admin' && u.active).length <= 1) {
@@ -138,6 +168,7 @@
     }
     users = users.filter(u => u.id !== id);
     saveUsers(users);
+    S.write(S.KEYS.userStats, readStats().filter(x => x.id !== id));
     logActivity('刪除使用者', target.username, '-');
     return { ok: true };
   }

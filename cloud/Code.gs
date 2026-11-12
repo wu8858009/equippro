@@ -22,7 +22,10 @@ var CHUNK = 40000;
 // as a number, date or formula (a JSON fragment can start with "=", "-", digits…).
 var MARK = '~';
 var MAX_PULL_CHARS = 4000000;
-var COLLECTIONS = ['users', 'equipment', 'replacements', 'quotes', 'activity', 'maintenancePlans', 'maintenanceLogs'];
+var COLLECTIONS = ['users', 'equipment', 'replacements', 'quotes', 'activity', 'maintenancePlans', 'maintenanceLogs', 'userStats'];
+// The activity log is append-only; keep the newest ACTIVITY_KEEP entries once it passes ACTIVITY_MAX.
+var ACTIVITY_KEEP = 1000;
+var ACTIVITY_MAX = 1500;
 
 // 在編輯器選擇這個函式按「執行」一次，完成授權並建立 records 工作表。
 function setup() {
@@ -42,7 +45,11 @@ function doPost(e) {
     return out({ ok: false, error: 'BAD_REQUEST', message: '請求格式錯誤' });
   }
   var lock = LockService.getScriptLock();
-  lock.waitLock(30000);
+  try {
+    lock.waitLock(30000);
+  } catch (err) {
+    return out({ ok: false, error: 'BUSY', message: '雲端忙碌中（其他裝置正在同步），稍後會自動重試' });
+  }
   try {
     var auth = checkKey(req.key);
     if (!auth.ok) return out(auth);
@@ -118,6 +125,27 @@ function readIndex(sh) {
   return index;
 }
 
+// Drops the oldest activity rows once there are more than ACTIVITY_MAX, by
+// rewriting the sheet without them (rare: about once per 500 new entries).
+// Devices keep their own copies; they only cap theirs locally.
+function pruneActivity(sh) {
+  var last = sh.getLastRow();
+  if (last < 2) return false;
+  var fixed = sh.getRange(2, 1, last - 1, FIXED_COLS).getValues();
+  var act = [];
+  fixed.forEach(function (r, i) { if (r[0] === 'activity') act.push({ i: i, ts: Number(r[2]) }); });
+  if (act.length <= ACTIVITY_MAX) return false;
+  act.sort(function (a, b) { return a.ts - b.ts; });
+  var drop = {};
+  act.slice(0, act.length - ACTIVITY_KEEP).forEach(function (a) { drop[a.i] = true; });
+  var data = sh.getDataRange().getValues();
+  var width = data[0].length;
+  var keep = data.slice(1).filter(function (r, i) { return !drop[i]; });
+  sh.getRange(2, 1, last - 1, width).clearContent();
+  if (keep.length) sh.getRange(2, 1, keep.length, width).setValues(keep);
+  return true;
+}
+
 function sync(req) {
   var sh = getSheet();
   var props = PropertiesService.getScriptProperties();
@@ -157,6 +185,7 @@ function sync(req) {
     padded.forEach(function (r, i) { index[r[0] + '|' + r[1]].row = start + i; });
   }
   props.setProperty('REV', String(rev));
+  if (pruneActivity(sh)) index = readIndex(sh);
 
   // Pull: everything newer than the client's cursor (plus the server copy of
   // anything we rejected), oldest first, capped per response.

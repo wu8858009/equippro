@@ -553,9 +553,8 @@ textarea { resize: vertical; font-family: inherit; }
 .brand-mark { background: linear-gradient(135deg, #3d8ef0, #1f62b8); box-shadow: 0 4px 12px rgba(42, 120, 214, .35); }
 .nav { gap: 3px; overflow-y: auto; padding-top: 8px; }
 .nav-item { position: relative; padding: 10px 14px; font-size: 14px; border-radius: var(--radius-sm); }
-.nav-item.active::before {
-  content: ""; position: absolute; left: -12px; top: 8px; bottom: 8px; width: 4px; border-radius: 0 4px 4px 0; background: var(--brand);
-}
+/* drawn inside the item: .nav scrolls, so anything outside its box is clipped */
+.nav-item.active { box-shadow: inset 3px 0 0 var(--brand); }
 .nav-icon { font-size: 16px; width: 20px; }
 
 .topbar {
@@ -677,13 +676,11 @@ textarea { resize: vertical; font-family: inherit; }
 /* tablet / narrow window: icon rail */
 @media (max-width: 980px) {
   .sidebar { width: 72px; padding: 16px 10px; }
-  .nav-item.active::before { left: -10px; }
   .topbar-date { display: none; }
   .brand { border-bottom: none; }
 }
 @media (max-width: 600px) {
   .sidebar { width: 250px; }
-  .nav-item.active::before { display: none; }
   .content { padding: 16px 12px 40px; }
   .toolbar input.input[type="text"] { max-width: none; flex-basis: 100%; }
   .stat-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
@@ -731,4 +728,5 @@ textarea { resize: vertical; font-family: inherit; }
   .qr-label-sheet { display: grid; gap: 2mm; justify-content: start; }
   .qr-label { break-inside: avoid; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
 }
-@page { margin: 8mm; }
+@page labels { margin: 8mm; }
+#label-print-root { page: labels; }

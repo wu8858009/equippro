@@ -302,7 +302,7 @@
       else { renderLogin(result.message); }
     });
     const cloudBtn = document.getElementById('login-cloud-btn');
-    if (cloudBtn) cloudBtn.addEventListener('click', () => openCloudConnectModal('replace'));
+    if (cloudBtn) cloudBtn.addEventListener('click', () => openCloudConnectModal());
   }
 
   // A deep link (e.g. a scanned QR label) opened while logged out is
@@ -370,7 +370,7 @@
       const login = EPM.auth.login(username, password);
       if (login.ok) { goAfterLogin(); checkDueReminders(); } else renderLogin();
     });
-    document.getElementById('setup-cloud-btn').addEventListener('click', () => openCloudConnectModal('replace'));
+    document.getElementById('setup-cloud-btn').addEventListener('click', () => openCloudConnectModal());
   }
 
   /* ---------- dashboard view ---------- */
@@ -706,6 +706,7 @@
   let eqPage = 1;
   let eqAdvancedOpen = false;
   let eqSearchFocus = false;
+  let scanTimer = null;
 
   function getEqColumns() {
     const saved = S.read(S.KEYS.equipmentColumns, null);
@@ -870,13 +871,23 @@
 
     const resetPage = () => { eqPage = 1; };
 
-    document.getElementById('eq-search').addEventListener('input', (e) => {
-      // A USB/handheld scanner "types" the label's URL into the search box:
-      // jump straight to that equipment.
-      const hit = /#\/qr\/([^\s/?#]+)/.exec(e.target.value);
-      if (hit) {
-        eqFilters.search = '';
-        navigate('/qr/' + hit[1]);
+    // A USB/handheld scanner "types" the label's URL into the search box one
+    // character at a time, usually ending with Enter. Jump to the equipment
+    // only once the whole URL is in: on Enter, or after typing pauses.
+    const searchInput = document.getElementById('eq-search');
+    const openScanned = () => {
+      clearTimeout(scanTimer);
+      const hit = /#\/qr\/([^\s/?#]+)/.exec(searchInput.value);
+      if (!hit) return false;
+      eqFilters.search = '';
+      navigate('/qr/' + hit[1]);
+      return true;
+    };
+    searchInput.addEventListener('keydown', (e) => { if (e.key === 'Enter' && openScanned()) e.preventDefault(); });
+    searchInput.addEventListener('input', (e) => {
+      if (/#\/qr\//.test(e.target.value)) {
+        clearTimeout(scanTimer);
+        scanTimer = setTimeout(openScanned, 250);
         return;
       }
       eqFilters.search = e.target.value; resetPage(); eqSearchFocus = true; renderEquipmentList();
@@ -1783,6 +1794,7 @@
 
   function planDueBadge(p) {
     if (p.active === false) return '<span class="badge badge-muted">已暫停</span>';
+    if (p.eqInactive) return '<span class="badge badge-muted">設備已汰換</span>';
     if (p.daysLeft === null || p.daysLeft === undefined) return '<span class="badge badge-muted">—</span>';
     if (p.daysLeft < 0) return `<span class="badge badge-crit">逾期 ${Math.abs(p.daysLeft)} 天</span>`;
     if (p.daysLeft === 0) return '<span class="badge badge-warn">今天到期</span>';
@@ -1819,7 +1831,7 @@
         <td class="mono" data-label="下次到期">${fmtDate(p.nextDueDate)}</td>
         <td data-label="狀態">${planDueBadge(p)}</td>
         <td class="row-actions">
-          ${p.active !== false ? `<button class="btn btn-sm btn-primary" data-mp-complete="${p.id}">✔ 完成保養</button>` : ''}
+          ${p.tier !== 'inactive' ? `<button class="btn btn-sm btn-primary" data-mp-complete="${p.id}">✔ 完成保養</button>` : ''}
           <button class="btn btn-sm btn-ghost" data-mp-edit="${p.id}">編輯</button>
           ${isAdmin ? `<button class="btn btn-sm btn-ghost btn-danger" data-mp-del="${p.id}">刪除</button>` : ''}
         </td>
@@ -1934,7 +1946,7 @@
 
   function renderMaintenance() {
     const schedule = M.listPlans().map(M.planStatus)
-      .sort((a, b) => (a.active === false) - (b.active === false) || (a.daysLeft ?? 1e9) - (b.daysLeft ?? 1e9));
+      .sort((a, b) => (a.tier === 'inactive') - (b.tier === 'inactive') || (a.daysLeft ?? 1e9) - (b.daysLeft ?? 1e9));
     const logs = M.listLogs().slice().sort((a, b) => String(b.date).localeCompare(String(a.date)) || b.createdAt - a.createdAt);
     const due = M.dueSoon();
     const open = M.openRepairs();
@@ -1944,8 +1956,7 @@
     const plans = schedule.filter(p => {
       if (maintFilters.status === 'overdue' && p.tier !== 'overdue') return false;
       if (maintFilters.status === 'soon' && p.tier !== 'soon') return false;
-      if (maintFilters.status === 'paused' && p.active !== false) return false;
-      if (maintFilters.status && maintFilters.status !== 'paused' && p.active === false) return false;
+      if (maintFilters.status === 'paused' && p.tier !== 'inactive') return false;
       return match(p.equipmentId, p.title + ' ' + (p.vendor || ''));
     });
     const shownLogs = logs.filter(l => {
@@ -1989,7 +2000,7 @@
           <option value="">全部排程</option>
           <option value="overdue" ${maintFilters.status === 'overdue' ? 'selected' : ''}>已逾期</option>
           <option value="soon" ${maintFilters.status === 'soon' ? 'selected' : ''}>即將到期</option>
-          <option value="paused" ${maintFilters.status === 'paused' ? 'selected' : ''}>已暫停</option>
+          <option value="paused" ${maintFilters.status === 'paused' ? 'selected' : ''}>已暫停／設備已汰換</option>
         </select>` : `
         <select class="input" id="maint-type">
           <option value="">全部類型</option>
@@ -2516,6 +2527,20 @@
     });
   }
 
+  // Decides how a device joins the cloud: an empty cloud receives this
+  // device's data (merge); otherwise the cloud's data replaces this device's,
+  // after confirming when this device has data of its own. null = cancelled.
+  function localRecordCount() {
+    return Object.keys(S.SYNCED).filter(c => c !== 'activity')
+      .reduce((t, c) => t + (S.read(S.SYNCED[c], []) || []).length, 0);
+  }
+  function chooseConnectMode(info) {
+    if (!EPM.sync.cloudRecordCount(info)) return 'merge';
+    // No accounts here = a fresh install; its demo data is disposable.
+    if (!EPM.auth.hasUsers() || !localRecordCount()) return 'replace';
+    return confirmAction('雲端已經有資料。連線後，這台裝置現有的資料（設備、紀錄、帳號）會被雲端資料取代，且無法復原。\n\n確定要繼續嗎？') ? 'replace' : null;
+  }
+
   // New device: take the accounts and data from the cloud.
   function openCloudConnectModal(mode) {
     const cfg = EPM.sync.config();
@@ -2525,7 +2550,7 @@
         <p class="muted" style="margin:0;font-size:13px;">輸入管理員提供的後端網址與同步密碼。最方便的方式是用手機掃描管理員在「系統設定 → 雲端同步」顯示的連線 QR Code。</p>
         <label class="field"><span>後端網址</span><input type="url" name="url" required placeholder="https://script.google.com/macros/s/……/exec" value="${esc(cfg.url || '')}" /></label>
         <label class="field"><span>同步密碼</span><input type="password" name="key" required minlength="4" autocomplete="off" /></label>
-        <p class="form-hint">連線後，這台裝置的資料會改用雲端上的資料（包含使用者帳號）。</p>
+        <p class="form-hint">雲端已有資料時，這台裝置會改用雲端上的資料（包含使用者帳號）；雲端還是空的，則會把這台裝置的資料上傳。</p>
         <div class="form-error" id="cloud-connect-error" hidden></div>
         <div class="modal-footer">
           <button type="button" class="btn btn-ghost" data-close-modal>取消</button>
@@ -2542,9 +2567,11 @@
           btn.disabled = true; btn.textContent = '連線中…';
           err.hidden = true;
           try {
-            await EPM.sync.connect(form.url.value, form.key.value, mode || 'replace');
+            const run = mode || chooseConnectMode(await EPM.sync.test(form.url.value, form.key.value));
+            if (!run) { btn.disabled = false; btn.textContent = '連線'; return; }
+            await EPM.sync.connect(form.url.value, form.key.value, run);
             closeModal();
-            toast('已連線雲端，請用您的帳號登入');
+            toast(run === 'merge' ? '已連線雲端，並已上傳這台裝置的資料' : '已連線雲端，請用您的帳號登入');
             render();
           } catch (ex) {
             err.textContent = ex.message; err.hidden = false;
@@ -2572,7 +2599,7 @@
             <div class="brand-sub">將這台裝置連線到 EquipPro 雲端資料</div>
           </div>
           <div class="muted settings-url" style="font-size:12px;margin-bottom:12px;">${esc(info.url)}</div>
-          ${hasLocal ? '<div class="form-hint" style="margin-bottom:12px;">這台裝置已有本機資料。連線後會改用雲端上的資料與帳號，本機原有資料將被取代。</div>' : ''}
+          ${hasLocal ? '<div class="form-hint" style="margin-bottom:12px;">這台裝置已有本機資料。若雲端已有資料，連線前會再次確認是否以雲端資料取代。</div>' : ''}
           <div class="form-error" id="connect-error" hidden></div>
           <button type="button" class="btn btn-primary btn-block" id="connect-go">連線</button>
           <button type="button" class="btn btn-ghost btn-block" id="connect-cancel" style="margin-top:8px;">取消</button>
@@ -2583,8 +2610,10 @@
       const btn = e.target;
       btn.disabled = true; btn.textContent = '連線中…';
       try {
-        await EPM.sync.connect(info.url, info.key, 'replace');
-        toast('已連線雲端，請用您的帳號登入');
+        const run = chooseConnectMode(await EPM.sync.test(info.url, info.key));
+        if (!run) { btn.disabled = false; btn.textContent = '連線'; return; }
+        await EPM.sync.connect(info.url, info.key, run);
+        toast(run === 'merge' ? '已連線雲端，並已上傳這台裝置的資料' : '已連線雲端，請用您的帳號登入');
         leave();
       } catch (ex) {
         const err = document.getElementById('connect-error');

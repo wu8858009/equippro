@@ -70,7 +70,7 @@
     return plan;
   }
 
-  function updatePlan(id, patch) {
+  function updatePlan(id, patch, silent) {
     const all = listPlans();
     const idx = all.findIndex(p => p.id === id);
     if (idx === -1) return null;
@@ -80,7 +80,7 @@
     if (patch.estimatedCost !== undefined) patch.estimatedCost = Number(patch.estimatedCost) || 0;
     all[idx] = { ...all[idx], ...patch, updatedAt: Date.now() };
     savePlans(all);
-    EPM.auth.logActivity('編輯保養排程', eqName(all[idx].equipmentId), all[idx].title);
+    if (!silent) EPM.auth.logActivity('編輯保養排程', eqName(all[idx].equipmentId), all[idx].title);
     return all[idx];
   }
 
@@ -102,23 +102,27 @@
       date, completedDate: date, title: plan.title,
       description: data.description, cost: data.cost, vendor: data.vendor || plan.vendor, photos: data.photos
     }, true);
-    updatePlan(plan.id, { lastDoneDate: date, nextDueDate: addInterval(date, plan.intervalValue, plan.intervalUnit) });
+    updatePlan(plan.id, { lastDoneDate: date, nextDueDate: addInterval(date, plan.intervalValue, plan.intervalUnit) }, true);
     EPM.auth.logActivity('完成保養', eqName(plan.equipmentId), plan.title + ' ' + date);
     return log;
   }
 
   // Plans with a due status attached, soonest first. Inactive (paused) plans
   // and plans of retired equipment are skipped.
+  // tier: overdue / soon / ok, or 'inactive' when the plan is paused or its
+  // equipment is retired or gone — those never count as due anywhere.
   function planStatus(p) {
     const daysLeft = daysUntil(p.nextDueDate);
-    const tier = daysLeft === null ? 'none' : daysLeft < 0 ? 'overdue' : daysLeft <= (p.remindDays || 0) ? 'soon' : 'ok';
-    return { ...p, daysLeft, tier };
+    const eq = EPM.equipment.get(p.equipmentId);
+    const eqInactive = !eq || eq.status === 'retired';
+    let tier = daysLeft === null ? 'none' : daysLeft < 0 ? 'overdue' : daysLeft <= (p.remindDays || 0) ? 'soon' : 'ok';
+    if (p.active === false || eqInactive) tier = 'inactive';
+    return { ...p, daysLeft, tier, eqInactive };
   }
   function schedule() {
     return listPlans()
-      .filter(p => p.active !== false)
-      .filter(p => { const eq = EPM.equipment.get(p.equipmentId); return eq && eq.status !== 'retired'; })
       .map(planStatus)
+      .filter(p => p.tier !== 'inactive')
       .sort((a, b) => (a.daysLeft ?? 1e9) - (b.daysLeft ?? 1e9));
   }
   function dueSoon() { return schedule().filter(p => p.tier === 'overdue' || p.tier === 'soon'); }
