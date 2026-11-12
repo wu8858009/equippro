@@ -24,6 +24,12 @@ var MARK = '~';
 var MAX_PULL_CHARS = 4000000;
 var COLLECTIONS = ['users', 'equipment', 'replacements', 'quotes', 'activity', 'maintenancePlans', 'maintenanceLogs'];
 
+// 在編輯器選擇這個函式按「執行」一次，完成授權並建立 records 工作表。
+function setup() {
+  getSheet();
+  Logger.log('EquipPro 雲端後端已就緒');
+}
+
 function doGet() {
   return ContentService.createTextOutput('EquipPro 雲端同步後端運作中。請在 EquipPro 的「系統設定 → 雲端同步」貼上本網址。');
 }
