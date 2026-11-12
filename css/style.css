@@ -468,3 +468,10 @@ a.kpi:hover { text-decoration: none; border-color: var(--accent-2); }
   .pd-chart .ch-val, .pd-chart .ch-lab { fill: #000; }
   .pd-chart .chart-scroll { overflow: visible; }
 }
+
+/* work-area history */
+.area-log { list-style: none; margin: 0; padding: 0 0 0 14px; border-left: 2px solid var(--line); }
+.area-log li { position: relative; padding: 4px 0 8px 10px; }
+.area-log li::before { content: ''; position: absolute; left: -21px; top: 9px; width: 10px; height: 10px; border-radius: 50%; background: var(--line); border: 2px solid var(--card); }
+.area-log li.cur::before { background: var(--accent); }
+.area-log small { display: block; color: var(--muted); font-size: 12px; }

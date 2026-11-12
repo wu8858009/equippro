@@ -332,18 +332,21 @@
         <section class="card"><div class="card-head"><h2>依設備分類</h2></div>${UI.rankBars(by((x) => x.eq && x.eq.category))}</section>
         <section class="card"><div class="card-head"><h2>依廠商</h2></div>${UI.rankBars(by((x) => x.vendor))}</section>
         <section class="card"><div class="card-head"><h2>花費最多的設備</h2></div>${UI.rankBars(by(eqLabel))}</section>
+        <section class="card"><div class="card-head"><h2>依使用工作區</h2></div>${UI.rankBars(by((x) => x.eq && x.eq.area))}</section>
+        <section class="card"><div class="card-head"><h2>各工作區設備數</h2></div>${UI.rankBars((() => { const m = {}; eqs.filter((e) => e.status !== '已汰換').forEach((e) => { const k = e.area || '（未指定）'; m[k] = (m[k] || 0) + 1; }); return Object.entries(m).map(([label, value]) => ({ label, value })); })(), { money: false })}</section>
         <section class="card"><div class="card-head"><h2>依放置位置</h2></div>${UI.rankBars(by((x) => x.eq && x.eq.location))}</section>
         <section class="card"><div class="card-head"><h2>設備狀態</h2></div>${UI.rankBars(SG.STATUSES.map((s) => ({ label: s, value: eqs.filter((e) => (e.status || '使用中') === s).length })), { money: false })}</section>
         <section class="card"><div class="card-head"><h2>各分類設備數</h2></div>${UI.rankBars((() => { const m = {}; eqs.filter((e) => e.status !== '已汰換').forEach((e) => { const k = e.category || '（未分類）'; m[k] = (m[k] || 0) + 1; }); return Object.entries(m).map(([label, value]) => ({ label, value })); })(), { money: false })}</section>
       </div>`;
     UI.$('#r-period', main).onchange = (e) => { rPeriod = e.target.value; UI.render(); };
-    const detail = () => rows.slice().sort((a, b) => a.date.localeCompare(b.date)).map((x) => [x.date, x.kind, x.eq ? x.eq.code || '' : '', x.eq ? x.eq.name : eqLabel(x), x.eq ? x.eq.store || '' : '', x.eq ? x.eq.category || '' : '', x.eq ? x.eq.location || '' : '', x.title || '', x.vendor, x.amount]);
+    const detail = () => rows.slice().sort((a, b) => a.date.localeCompare(b.date)).map((x) => [x.date, x.kind, x.eq ? x.eq.code || '' : '', x.eq ? x.eq.name : eqLabel(x), x.eq ? x.eq.store || '' : '', x.eq ? x.eq.category || '' : '', x.eq ? x.eq.area || '' : '', x.eq ? x.eq.location || '' : '', x.title || '', x.vendor, x.amount]);
     const ranked = (fn) => by(fn).sort((a, b) => b.value - a.value).map((d) => [d.label, d.value]);
     UI.$('#r-exp', main).onclick = () => SG.excel.save(`支出報表_${label}_${U.today()}.xlsx`, [
-      { name: '支出明細', rows: [['日期', '類別', '設備編號', '設備', '分店', '分類', '位置', '項目', '廠商', '金額（含稅）']].concat(detail()) },
+      { name: '支出明細', rows: [['日期', '類別', '設備編號', '設備', '分店', '分類', '工作區', '位置', '項目', '廠商', '金額（含稅）']].concat(detail()) },
       { name: rPeriod === 'all' ? '每年' : '每月', rows: [['期間', '金額']].concat(months.map((m) => [m.label, m.value])) },
       { name: '依類別', rows: [['類別', '金額', '筆數']].concat(shownKinds.map((k) => [k, sum(rows.filter((x) => x.kind === k)), rows.filter((x) => x.kind === k).length])) },
       { name: '依分類', rows: [['設備分類', '金額']].concat(ranked((x) => x.eq && x.eq.category)) },
+      { name: '依工作區', rows: [['使用工作區', '金額']].concat(ranked((x) => x.eq && x.eq.area)) },
       { name: '依廠商', rows: [['廠商', '金額']].concat(ranked((x) => x.vendor)) },
       { name: '依設備', rows: [['設備', '金額']].concat(ranked(eqLabel)) }
     ]).catch((e) => UI.toast(e.message, 'error'));
@@ -354,6 +357,7 @@
         <h2>${rPeriod === 'all' ? '每年支出' : '每月支出'}</h2><div class="pd-chart">${UI.barChart(months)}</div>
         ${SG.printTable(months.map((m) => m.label), [months.map((m) => m.value ? Math.round(m.value).toLocaleString() : '—')], { numCols: months.map((_, i) => i) })}
         <div class="pd-cols">${t('依設備分類', ranked((x) => x.eq && x.eq.category).slice(0, 15))}${t('依廠商', ranked((x) => x.vendor).slice(0, 15))}</div>
+        ${t('依使用工作區', ranked((x) => x.eq && x.eq.area))}
         ${t('花費最多的設備（前 20）', ranked(eqLabel).slice(0, 20))}`);
     };
   });
@@ -374,7 +378,7 @@
       return `<div class="labels size-${size}">${list.map((e) => `<div class="label">
         <div class="label-qr">${this.svg(e)}</div>
         <div class="label-text"><div class="label-org">${esc(org)}${e.store ? '・' + esc(e.store) : ''}</div><div class="label-name">${esc(e.name)}</div>
-        <div class="label-code">${esc(e.code || '')}</div>${e.location ? `<div class="label-loc">${esc(e.location)}</div>` : ''}</div></div>`).join('')}</div>`;
+        <div class="label-code">${esc(e.code || '')}</div>${e.area || e.location ? `<div class="label-loc">${esc([e.area, e.location].filter(Boolean).join('・'))}</div>` : ''}</div></div>`).join('')}</div>`;
     },
     print(list, size) {
       let area = UI.$('#print-area');
@@ -402,7 +406,7 @@
       <div class="toolbar card"><input type="search" id="l-q" placeholder="🔍 篩選名稱、編號、位置…" value="${esc(labelFilter)}">
         <button class="btn" id="l-all">全選目前列表</button><button class="btn" id="l-none">全部取消</button></div>
       <div id="l-list" class="label-pick"></div>`;
-    const visible = () => { const s = labelFilter.toLowerCase(); return eqs.filter((e) => !s || [e.name, e.code, e.location, e.category].some((x) => String(x || '').toLowerCase().includes(s))); };
+    const visible = () => { const s = labelFilter.toLowerCase(); return eqs.filter((e) => !s || [e.name, e.code, e.location, e.category, e.area].some((x) => String(x || '').toLowerCase().includes(s))); };
     const count = () => (UI.$('#l-n', main).textContent = [...labelSel].filter((id) => DB.get('equipment', id)).length);
     const draw = () => {
       const list = visible();
@@ -538,6 +542,7 @@
           <div class="field"><label>QR 標籤連結網址</label><input id="s-qr" value="${esc(s.qrBaseUrl)}"><small class="hint">手機掃描標籤時打開的網頁版位址</small></div>
           <div class="field"><label>常用分類（用逗號分隔）</label><input id="s-cats" value="${esc(s.categories.join('，'))}" placeholder="廚房設備，空調，資訊設備"></div>
           <div class="field"><label>常用位置（用逗號分隔）</label><input id="s-locs" value="${esc(s.locations.join('，'))}" placeholder="一樓廚房，二樓辦公室"></div>
+          <div class="field span-2"><label>工作區（用逗號分隔）</label><input id="s-areas" value="${esc(s.areas.join('，'))}" placeholder="內場，外場，吧台，倉庫"><small class="hint">設備的「目前使用工作區」可從這裡選</small></div>
           <div class="field span-2"><label>分店（用逗號分隔，只有一家店可留空）</label><input id="s-stores" value="${esc(s.stores.join('，'))}" placeholder="碧潭店，新店店"><small class="hint">設定後，設備可以指定分店，左上角可切換只看某一家分店</small></div>
         </div>
         <div class="btn-row"><button class="btn primary" id="s-save">儲存設定</button></div>
@@ -574,7 +579,7 @@
     });
     on('#s-save', () => {
       const split = (v) => v.split(/[,，、\n]/).map((x) => x.trim()).filter(Boolean);
-      DB.saveSettings({ orgName: UI.$('#s-org', main).value.trim() || '設備管家', qrBaseUrl: UI.$('#s-qr', main).value.trim() || SG.config.publicUrl, categories: split(UI.$('#s-cats', main).value), locations: split(UI.$('#s-locs', main).value), stores: [...new Set(split(UI.$('#s-stores', main).value))] });
+      DB.saveSettings({ orgName: UI.$('#s-org', main).value.trim() || '設備管家', qrBaseUrl: UI.$('#s-qr', main).value.trim() || SG.config.publicUrl, categories: split(UI.$('#s-cats', main).value), locations: split(UI.$('#s-locs', main).value), stores: [...new Set(split(UI.$('#s-stores', main).value))], areas: [...new Set(split(UI.$('#s-areas', main).value))] });
       SG.log('修改系統設定', '');
       UI.toast('設定已儲存');
       SG.shell.render();

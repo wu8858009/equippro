@@ -28,6 +28,7 @@
       { name: 'code', label: '設備編號', hint: '自動產生，可自行修改' },
       ...(s.stores.length ? [{ name: 'store', label: '分店', type: 'select', options: [{ value: '', label: '（未指定）' }, ...new Set([...s.stores, ...(values.store ? [values.store] : [])])] }] : []),
       { name: 'category', label: '分類', list: Q.distinct('category', s.categories), placeholder: '例如：廚房設備' },
+      { name: 'area', label: '目前使用工作區', list: Q.distinct('area', s.areas), placeholder: '例如：內場、外場、吧台', hint: '修改後會自動記入「工作區移轉紀錄」' },
       { name: 'location', label: '放置位置', list: Q.distinct('location', s.locations), placeholder: '例如：一樓廚房' },
       { name: 'brand', label: '品牌' },
       { name: 'model', label: '型號' },
@@ -50,10 +51,47 @@
         const rec = Object.assign({}, existing || {}, preset.replacesId ? { replacesId: preset.replacesId } : {}, v);
         if (v.status === '已汰換' && !rec.retiredAt) rec.retiredAt = U.today();
         if (v.status !== '已汰換') delete rec.retiredAt;
+        F.trackArea(rec, existing ? (existing.area || '') : undefined, U.today(), '');
         DB.put('equipment', rec);
         SG.log(isNew ? '新增設備' : '修改設備', rec.name);
         UI.toast(isNew ? '已新增設備' : '已儲存');
         if (isNew) UI.go('#/eq/' + rec.id); else UI.render();
+      }
+    });
+  };
+
+  // Work area (工作區) history: every change of `area` is appended to
+  // rec.areaLog = [{ area, date, by, note }] (newest last).
+  F.trackArea = function (rec, prevArea, date, note) {
+    const now = rec.area || '';
+    const log = Array.isArray(rec.areaLog) ? rec.areaLog.slice() : [];
+    if (prevArea === undefined) { // new equipment
+      if (now) log.push({ area: now, date, by: Auth.current ? Auth.current.name : '', note: note || '啟用' });
+    } else if ((prevArea || '') !== now) {
+      if (!log.length && prevArea) log.push({ area: prevArea, date: rec.purchaseDate || '', by: '', note: '原工作區' });
+      log.push({ area: now || '（未指定）', date, by: Auth.current ? Auth.current.name : '', note: note || '' });
+    }
+    if (log.length) rec.areaLog = log;
+  };
+  F.moveArea = function (e) {
+    const s = DB.settings();
+    UI.formModal({
+      title: '移轉工作區：' + e.name, wide: false,
+      fields: [
+        { type: 'html', html: `<p class="small">目前工作區：<b>${esc(e.area || '（未指定）')}</b></p>` },
+        { name: 'area', label: '移到哪個工作區', required: true, list: Q.distinct('area', s.areas).filter((a) => a !== e.area) },
+        { name: 'location', label: '新的放置位置（可不改）', list: Q.distinct('location', s.locations), value: e.location || '' },
+        { name: 'date', label: '移轉日期', type: 'date', required: true, value: U.today() },
+        { name: 'note', label: '原因／備註', placeholder: '例如：外場人手不足借用' }
+      ],
+      onSave(v) {
+        if (v.area === (e.area || '')) throw new Error('工作區沒有改變');
+        const rec = Object.assign({}, e, { area: v.area, location: v.location });
+        F.trackArea(rec, e.area || '', v.date, v.note);
+        DB.put('equipment', rec);
+        SG.log('移轉工作區', `${e.name}：${e.area || '（未指定）'} → ${v.area}`);
+        UI.toast('已移轉到 ' + v.area);
+        UI.render();
       }
     });
   };
@@ -91,7 +129,7 @@
           SG.log('設備汰換', eq.name);
           UI.toast('已記錄，請填寫新設備資料');
           setTimeout(() => F.equipment(null, {
-            name: eq.name, category: eq.category, location: eq.location, owner: eq.owner,
+            name: eq.name, category: eq.category, location: eq.location, area: eq.area, store: eq.store, owner: eq.owner,
             brand: '', model: v.newInfo || '', purchaseDate: v.date, price: v.cost, vendor: v.vendor,
             warrantyUntil: v.warrantyUntil, lifeYears: eq.lifeYears, replacesId: eq.id,
             note: `取代 ${eq.code || ''} ${eq.name}`.trim()
@@ -309,7 +347,7 @@
   });
 
   // ====================================================== equipment list
-  const listState = { q: '', category: '', location: '', status: 'active', sort: 'code' };
+  const listState = { q: '', category: '', location: '', area: '', status: 'active', sort: 'code' };
   UI.route('/equipment', (main) => renderList(main));
   UI.route('/equipment\\?(.*)', (main, qs) => {
     const p = new URLSearchParams(qs);
@@ -318,7 +356,7 @@
   });
   function renderList(main) {
     const all = Q.eqs();
-    const cats = Q.distinct('category'), locs = Q.distinct('location');
+    const cats = Q.distinct('category'), locs = Q.distinct('location'), areas = Q.distinct('area');
     let current = [];
     main.innerHTML = `
       ${UI.pageHead('設備清單', `
@@ -329,9 +367,10 @@
       <div class="toolbar card">
         <input type="search" id="e-q" placeholder="🔍 搜尋名稱、編號、品牌、型號、序號…" value="${esc(listState.q)}">
         <select id="e-cat"><option value="">全部分類</option>${cats.map((c) => `<option ${c === listState.category ? 'selected' : ''}>${esc(c)}</option>`).join('')}</select>
+        ${areas.length ? `<select id="e-area"><option value="">全部工作區</option>${areas.map((c) => `<option ${c === listState.area ? 'selected' : ''}>${esc(c)}</option>`).join('')}</select>` : ''}
         <select id="e-loc"><option value="">全部位置</option>${locs.map((c) => `<option ${c === listState.location ? 'selected' : ''}>${esc(c)}</option>`).join('')}</select>
         <select id="e-sort">
-          ${[['code', '依編號'], ['name', '依名稱'], ['purchase', '依購買日（新→舊）'], ['price', '依金額（高→低）'], ['location', '依位置']].map(([v, l]) => `<option value="${v}" ${listState.sort === v ? 'selected' : ''}>${l}</option>`).join('')}
+          ${[['code', '依編號'], ['name', '依名稱'], ['purchase', '依購買日（新→舊）'], ['price', '依金額（高→低）'], ['area', '依工作區'], ['location', '依位置']].map(([v, l]) => `<option value="${v}" ${listState.sort === v ? 'selected' : ''}>${l}</option>`).join('')}
         </select>
       </div>
       <div class="chips" id="e-status">
@@ -346,7 +385,8 @@
         if (STATUSES.includes(listState.status) && st !== listState.status) return false;
         if (listState.category && e.category !== listState.category) return false;
         if (listState.location && e.location !== listState.location) return false;
-        if (q && ![e.name, e.code, e.brand, e.model, e.serial, e.category, e.location, e.vendor, e.note, e.owner, e.store].some((x) => String(x || '').toLowerCase().includes(q))) return false;
+        if (listState.area && e.area !== listState.area) return false;
+        if (q && ![e.name, e.code, e.brand, e.model, e.serial, e.category, e.location, e.vendor, e.note, e.owner, e.store, e.area].some((x) => String(x || '').toLowerCase().includes(q))) return false;
         return true;
       });
       const cmp = {
@@ -354,7 +394,8 @@
         name: (a, b) => a.name.localeCompare(b.name, 'zh-Hant'),
         purchase: (a, b) => (b.purchaseDate || '').localeCompare(a.purchaseDate || ''),
         price: (a, b) => U.num(b.price) - U.num(a.price),
-        location: (a, b) => (a.location || '').localeCompare(b.location || '', 'zh-Hant') || a.name.localeCompare(b.name, 'zh-Hant')
+        location: (a, b) => (a.location || '').localeCompare(b.location || '', 'zh-Hant') || a.name.localeCompare(b.name, 'zh-Hant'),
+        area: (a, b) => (a.area || '￿').localeCompare(b.area || '￿', 'zh-Hant') || a.name.localeCompare(b.name, 'zh-Hant')
       }[listState.sort];
       rows.sort(cmp);
       current = rows;
@@ -364,6 +405,7 @@
         { label: '名稱', render: (e) => `<b>${esc(e.name)}</b>${e.brand || e.model ? `<div class="muted small">${esc([e.brand, e.model].filter(Boolean).join(' '))}</div>` : ''}`, cls: 'primary-col' },
         ...(Q.stores().length && !Q.curStore() ? [{ label: '分店', key: 'store' }] : []),
         { label: '分類', key: 'category' },
+        { label: '工作區', render: (e) => (e.area ? UI.badge(e.area, 'b-blue') : '') },
         { label: '位置', key: 'location' },
         { label: '照片', render: (e) => { const p = SG.media.list('equipment', e.id)[0]; return p ? `<img class="row-thumb" src="${p.data}" alt="">` : ''; } },
         { label: '購買日', key: 'purchaseDate', cls: 'nowrap' },
@@ -375,6 +417,7 @@
     UI.$('#e-q', main).addEventListener('input', U.debounce((e) => { listState.q = e.target.value.trim(); draw(); }, 150));
     UI.$('#e-cat', main).onchange = (e) => { listState.category = e.target.value; draw(); };
     UI.$('#e-loc', main).onchange = (e) => { listState.location = e.target.value; draw(); };
+    const ar = UI.$('#e-area', main); if (ar) ar.onchange = (e) => { listState.area = e.target.value; draw(); };
     UI.$('#e-sort', main).onchange = (e) => { listState.sort = e.target.value; draw(); };
     UI.$$('#e-status .chip', main).forEach((c) => (c.onclick = () => {
       listState.status = c.dataset.v;
@@ -392,12 +435,12 @@
     const withStore = Q.stores().length && !Q.curStore();
     const total = rows.reduce((t, e) => t + U.num(e.price), 0);
     SG.print('設備清冊', `<p class="pd-sub">共 ${rows.length} 台・購買金額合計 ${U.money(total)}</p>` + SG.printTable(
-      ['編號', '設備名稱', ...(withStore ? ['分店'] : []), '分類', '位置', '品牌／型號', '購買日', '金額', '保固到期', '狀態'],
-      rows.map((e) => [e.code, e.name, ...(withStore ? [e.store || ''] : []), e.category, e.location, [e.brand, e.model].filter(Boolean).join(' '), e.purchaseDate, U.num(e.price) ? U.money(e.price) : '', e.warrantyUntil, e.status || '使用中']),
-      { numCols: [withStore ? 7 : 6] }), { landscape: true });
+      ['編號', '設備名稱', ...(withStore ? ['分店'] : []), '分類', '工作區', '位置', '品牌／型號', '購買日', '金額', '保固到期', '狀態'],
+      rows.map((e) => [e.code, e.name, ...(withStore ? [e.store || ''] : []), e.category, e.area, e.location, [e.brand, e.model].filter(Boolean).join(' '), e.purchaseDate, U.num(e.price) ? U.money(e.price) : '', e.warrantyUntil, e.status || '使用中']),
+      { numCols: [withStore ? 8 : 7] }), { landscape: true });
   }
 
-  const EQ_COLS = [['code', '設備編號'], ['name', '設備名稱'], ['store', '分店'], ['category', '分類'], ['location', '放置位置'], ['brand', '品牌'], ['model', '型號'], ['serial', '序號'], ['status', '狀態'], ['purchaseDate', '購買日期'], ['price', '購買金額'], ['vendor', '購買廠商'], ['warrantyUntil', '保固到期日'], ['lifeYears', '預期使用年限'], ['owner', '負責人'], ['note', '備註']];
+  const EQ_COLS = [['code', '設備編號'], ['name', '設備名稱'], ['store', '分店'], ['category', '分類'], ['area', '使用工作區'], ['location', '放置位置'], ['brand', '品牌'], ['model', '型號'], ['serial', '序號'], ['status', '狀態'], ['purchaseDate', '購買日期'], ['price', '購買金額'], ['vendor', '購買廠商'], ['warrantyUntil', '保固到期日'], ['lifeYears', '預期使用年限'], ['owner', '負責人'], ['note', '備註']];
   SG.EQ_COLS = EQ_COLS;
   function exportEquipment(list) {
     const rows = [EQ_COLS.map((c) => c[1])].concat(list.map((e) => EQ_COLS.map((c) => e[c[0]] == null ? '' : e[c[0]])));
@@ -463,7 +506,7 @@
     const ed = canEdit();
     const clip = (type, rid) => { const n = SG.media.count(type, rid); return `<button class="icon-btn clip ${n ? 'has' : ''}" data-att="${type}|${rid}" title="附件（發票、保固單、照片）">📎${n ? `<i>${n}</i>` : ''}</button>`; };
     const info = [
-      ['編號', e.code], ['分店', e.store], ['分類', e.category], ['位置', e.location], ['品牌', e.brand], ['型號', e.model], ['序號', e.serial],
+      ['編號', e.code], ['分店', e.store], ['使用工作區', e.area], ['分類', e.category], ['位置', e.location], ['品牌', e.brand], ['型號', e.model], ['序號', e.serial],
       ['購買日期', e.purchaseDate], ['購買金額', U.num(e.price) ? U.money(e.price) : ''], ['購買廠商', e.vendor],
       ['保固到期', e.warrantyUntil ? e.warrantyUntil + (w ? ' ' + UI.badge(w.label, w.key === 'ok' ? 'b-green' : w.key === 'soon' ? 'b-amber' : 'b-gray') : '') : ''],
       ['已使用', age != null ? age.toFixed(1) + ' 年' + (e.lifeYears ? `（預期 ${e.lifeYears} 年）` : '') : ''],
@@ -473,7 +516,7 @@
     main.innerHTML = `
       <a href="#/equipment" class="back">‹ 設備清單</a>
       ${UI.pageHead(e.name, `
-        ${ed ? `<button class="btn" id="x-edit">✏️ 編輯</button>` : ''}
+        ${ed ? `<button class="btn" id="x-edit">✏️ 編輯</button><button class="btn" id="x-move">🔀 移轉工作區</button>` : ''}
         <button class="btn" id="x-print">🖨️ 履歷表</button>
         <button class="btn" id="x-qr">🏷️ QR 標籤</button>
         ${ed ? `<button class="btn danger-ghost" id="x-del">刪除</button>` : ''}`, `<span class="mono">${esc(e.code || '')}</span> ${UI.statusBadge(e.status)}`)}
@@ -494,6 +537,8 @@
           ${prevEq ? `<p class="small">🔗 取代了 <a href="#/eq/${prevEq.id}">${esc(prevEq.code || '')} ${esc(prevEq.name)}</a></p>` : ''}
           ${nextEq ? `<p class="small">🔗 已由 <a href="#/eq/${nextEq.id}">${esc(nextEq.code || '')} ${esc(nextEq.name)}</a> 取代</p>` : ''}
           ${e.note ? `<div class="note">${esc(e.note).replace(/\n/g, '<br>')}</div>` : ''}
+          ${(e.areaLog || []).length > 1 ? `<div class="card-head" style="margin-top:14px"><h2>工作區移轉紀錄</h2></div>
+          <ol class="area-log">${e.areaLog.slice().reverse().map((a, i) => `<li class="${i === 0 ? 'cur' : ''}"><b>${esc(a.area)}</b>${i === 0 ? ' ' + UI.badge('目前', 'b-blue') : ''}<small>${esc([a.date, a.by, a.note].filter(Boolean).join('・'))}</small></li>`).join('')}</ol>` : ''}
         </section>
         <section class="card">
           <div class="card-head"><h2>費用總計</h2></div>
@@ -561,6 +606,7 @@
     on('#x-log', () => F.log(null, { equipmentId: e.id }));
     on('#x-plan', () => F.plan(null, e.id));
     on('#x-quote', () => F.quote(null, { equipmentId: e.id, item: e.name }));
+    on('#x-move', () => F.moveArea(e));
     UI.$$('[data-pdone]', main).forEach((b) => (b.onclick = () => { const p = DB.get('plans', b.dataset.pdone); F.log(null, { equipmentId: p.equipmentId, title: p.title, planId: p.id, vendor: p.vendor || '' }); }));
     UI.$$('[data-pedit]', main).forEach((b) => (b.onclick = () => F.plan(DB.get('plans', b.dataset.pedit))));
     UI.$$('[data-redit]', main).forEach((b) => (b.onclick = () => F.replacement(DB.get('replacements', b.dataset.redit))));
@@ -592,7 +638,7 @@
 
   // Printable history sheet of one piece of equipment.
   function printHistory(e, { reps, logs, plans, repairs, repCost, logCost }) {
-    const info = [['編號', e.code], ['分店', e.store], ['分類', e.category], ['位置', e.location], ['品牌', e.brand], ['型號', e.model], ['序號', e.serial],
+    const info = [['編號', e.code], ['分店', e.store], ['使用工作區', e.area], ['分類', e.category], ['位置', e.location], ['品牌', e.brand], ['型號', e.model], ['序號', e.serial],
       ['狀態', e.status || '使用中'], ['購買日期', e.purchaseDate], ['購買金額', U.num(e.price) ? U.money(e.price) : ''], ['購買廠商', e.vendor],
       ['保固到期', e.warrantyUntil], ['預期年限', e.lifeYears ? e.lifeYears + ' 年' : ''], ['負責人', e.owner]].filter((x) => x[1]);
     const photo = SG.media.list('equipment', e.id)[0];

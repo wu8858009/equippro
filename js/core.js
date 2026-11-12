@@ -320,7 +320,8 @@
         qrBaseUrl: s.qrBaseUrl || SG.config.publicUrl,
         categories: Array.isArray(s.categories) ? s.categories : [],
         locations: Array.isArray(s.locations) ? s.locations : [],
-        stores: Array.isArray(s.stores) ? s.stores : []
+        stores: Array.isArray(s.stores) ? s.stores : [],
+        areas: Array.isArray(s.areas) ? s.areas : []
       };
     },
     saveSettings(patch) {

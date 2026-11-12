@@ -169,7 +169,7 @@
     main.innerHTML = `<div class="qr-page">
       <div class="qr-head">${photo ? `<img src="${photo.data}" alt="">` : '<div class="qr-noimg">🗄️</div>'}
         <div><h1>${esc(e.name)}</h1><p class="sub"><span class="mono">${esc(e.code || '')}</span> ${UI.statusBadge(e.status)}</p>
-        <p class="small muted">${esc([e.store, e.location, e.brand, e.model].filter(Boolean).join('・'))}</p></div></div>
+        <p class="small muted">${e.area ? `<b>工作區：${esc(e.area)}</b>・` : ''}${esc([e.store, e.location, e.brand, e.model].filter(Boolean).join('・'))}</p></div></div>
       <div class="qr-actions">
         <button class="qr-btn red" id="qa-repair"><span>🛠️</span>報修</button>
         ${canEdit() ? `<button class="qr-btn teal" id="qa-maint"><span>🧽</span>記錄保養</button>` : ''}
@@ -319,7 +319,7 @@
     const s = q.trim().toLowerCase();
     const has = (...xs) => xs.some((x) => String(x == null ? '' : x).toLowerCase().includes(s));
     const groups = !s ? [] : [
-      ['🗄️ 設備', Q.eqs().filter((e) => has(e.name, e.code, e.brand, e.model, e.serial, e.location, e.category, e.note, e.store)).map((e) => [`#/eq/${e.id}`, `${e.code || ''} ${e.name}`, [e.store, e.location, e.brand, e.model, e.status].filter(Boolean).join('・')])],
+      ['🗄️ 設備', Q.eqs().filter((e) => has(e.name, e.code, e.brand, e.model, e.serial, e.location, e.category, e.note, e.store, e.area)).map((e) => [`#/eq/${e.id}`, `${e.code || ''} ${e.name}`, [e.store, e.area, e.location, e.brand, e.model, e.status].filter(Boolean).join('・')])],
       ['🧰 報修', DB.all('repairs').filter((r) => Q.inStoreRec(r) && has(r.title, r.desc, r.resolution, r.reporter, r.vendor)).map((r) => [`#/repair/${r.id}`, r.title, `${Q.eqName(r.equipmentId)}・${r.status}`])],
       ['🛠️ 保養維修紀錄', DB.all('logs').filter((l) => Q.inStoreRec(l) && has(l.title, l.content, l.vendor, l.by)).map((l) => [`#/eq/${l.equipmentId}`, `${l.type} ${l.title}`, `${Q.eqName(l.equipmentId)}・${l.date}`])],
       ['🔁 更換紀錄', DB.all('replacements').filter((r) => Q.inStoreRec(r) && has(r.item, r.reason, r.oldInfo, r.newInfo, r.vendor, r.note)).map((r) => [`#/eq/${r.equipmentId}`, `更換 ${r.item}`, `${Q.eqName(r.equipmentId)}・${r.date}`])],
