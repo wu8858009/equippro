@@ -240,6 +240,50 @@
   const charts = {};
   function destroyChart(key) {
     if (charts[key]) { charts[key].destroy(); delete charts[key]; }
+    const el = document.getElementById(key);
+    const old = el && el.parentElement && el.parentElement.querySelector('.chart-empty');
+    if (old) old.remove();
+  }
+
+  // Shown in place of a chart that has nothing to draw, so the card is not just blank.
+  function markEmpty(ctx, msg) {
+    if (!ctx || !ctx.parentElement) return;
+    const div = document.createElement('div');
+    div.className = 'chart-empty';
+    div.textContent = msg || '目前沒有可顯示的資料';
+    ctx.parentElement.appendChild(div);
+  }
+
+  // Largest `n` entries of a {label: value} map, the rest folded into one
+  // "其他" bucket, so charts stay readable with dozens of categories.
+  function topEntries(map, n) {
+    const entries = Object.entries(map).sort((a, b) => b[1] - a[1]);
+    if (entries.length <= n) return entries;
+    const head = entries.slice(0, n - 1);
+    const rest = entries.slice(n - 1);
+    head.push([`其他（${rest.length} 類）`, rest.reduce((t, e) => t + e[1], 0)]);
+    return head;
+  }
+
+  function countBarChart(canvasId, ctx, map, color) {
+    const entries = topEntries(map, 12);
+    const horizontal = entries.length > 6;
+    charts[canvasId] = new Chart(ctx, {
+      type: 'bar',
+      data: { labels: entries.map(e => e[0]), datasets: [{ label: '設備數量', data: entries.map(e => e[1]), backgroundColor: color, borderRadius: 4, maxBarThickness: horizontal ? 18 : 40 }] },
+      options: {
+        indexAxis: horizontal ? 'y' : 'x',
+        plugins: { legend: { display: false }, tooltip: { callbacks: { label: (c) => `${c.formattedValue} 台` } } },
+        scales: horizontal ? {
+          x: { beginAtZero: true, ticks: { precision: 0, color: ink() }, grid: { color: grid() } },
+          y: { ticks: { color: ink(), autoSkip: false, font: { size: 11 } }, grid: { display: false } }
+        } : {
+          x: { ticks: { color: ink() }, grid: { display: false } },
+          y: { beginAtZero: true, ticks: { precision: 0, color: ink() }, grid: { color: grid() } }
+        },
+        maintainAspectRatio: false
+      }
+    });
   }
 
   function renderStatusChart(canvasId) {
@@ -249,7 +293,7 @@
     const s = summary();
     const order = ['active', 'pending', 'retired', 'damaged'];
     const present = order.filter(k => s.byStatus[k]);
-    if (!present.length) return;
+    if (!present.length) return markEmpty(ctx, '尚無資料');
     charts[canvasId] = new Chart(ctx, {
       type: 'doughnut',
       data: {
@@ -273,20 +317,8 @@
     const ctx = document.getElementById(canvasId);
     if (!ctx) return;
     const s = summary();
-    const labels = Object.keys(s.byCategory);
-    if (!labels.length) return;
-    charts[canvasId] = new Chart(ctx, {
-      type: 'bar',
-      data: { labels, datasets: [{ label: '設備數量', data: labels.map(l => s.byCategory[l]), backgroundColor: PALETTE.blue, borderRadius: 4, maxBarThickness: 40 }] },
-      options: {
-        plugins: { legend: { display: false }, tooltip: { callbacks: { label: (c) => `${c.formattedValue} 台` } } },
-        scales: {
-          x: { ticks: { color: ink() }, grid: { display: false } },
-          y: { beginAtZero: true, ticks: { precision: 0, color: ink() }, grid: { color: grid() } }
-        },
-        maintainAspectRatio: false
-      }
-    });
+    if (!Object.keys(s.byCategory).length) return markEmpty(ctx, '尚無設備資料');
+    countBarChart(canvasId, ctx, s.byCategory, PALETTE.blue);
   }
 
   function renderDepartmentChart(canvasId) {
@@ -294,20 +326,8 @@
     const ctx = document.getElementById(canvasId);
     if (!ctx) return;
     const s = summary();
-    const labels = Object.keys(s.byDepartment);
-    if (!labels.length) return;
-    charts[canvasId] = new Chart(ctx, {
-      type: 'bar',
-      data: { labels, datasets: [{ label: '設備數量', data: labels.map(l => s.byDepartment[l]), backgroundColor: PALETTE.green, borderRadius: 4, maxBarThickness: 40 }] },
-      options: {
-        plugins: { legend: { display: false }, tooltip: { callbacks: { label: (c) => `${c.formattedValue} 台` } } },
-        scales: {
-          x: { ticks: { color: ink() }, grid: { display: false } },
-          y: { beginAtZero: true, ticks: { precision: 0, color: ink() }, grid: { color: grid() } }
-        },
-        maintainAspectRatio: false
-      }
-    });
+    if (!Object.keys(s.byDepartment).length) return markEmpty(ctx, '尚無設備資料');
+    countBarChart(canvasId, ctx, s.byDepartment, PALETTE.green);
   }
 
   function renderQuoteDecisionChart(canvasId) {
@@ -315,7 +335,7 @@
     const ctx = document.getElementById(canvasId);
     if (!ctx) return;
     const q = quoteDecisionSummary();
-    if (!q.totalItems) return;
+    if (!q.totalItems) return markEmpty(ctx, '尚無報價資料');
     const present = [];
     if (q.decided) present.push({ label: '已選定廠商', value: q.decided, color: STATUS_COLOR.active });
     if (q.pending) present.push({ label: '待決策', value: q.pending, color: STATUS_COLOR.pending });
@@ -338,7 +358,7 @@
     const ctx = document.getElementById(canvasId);
     if (!ctx) return;
     const u = userSummary();
-    if (!u.total) return;
+    if (!u.total) return markEmpty(ctx);
     const present = [];
     if (u.admin) present.push({ label: '管理員', value: u.admin, color: PALETTE.blue });
     if (u.staff) present.push({ label: '一般人員', value: u.staff, color: PALETTE.aqua });
@@ -361,7 +381,7 @@
     const ctx = document.getElementById(canvasId);
     if (!ctx) return;
     const { labels, data, byDay } = monthlyReplacementCost(range);
-    if (!labels.length) return;
+    if (!labels.length) return markEmpty(ctx, '這段期間沒有更換紀錄');
     const dispLabels = byDay ? labels.map(l => l.slice(5)) : labels;
     charts[canvasId] = new Chart(ctx, {
       type: 'line',
@@ -388,8 +408,12 @@
     const ctx = document.getElementById(canvasId);
     if (!ctx) return;
     const dep = depreciationSummary();
-    const labels = Object.keys(dep.byCategory);
-    if (!labels.length) return;
+    // Biggest categories by purchase value; zero-value ones say nothing here.
+    const labels = Object.keys(dep.byCategory)
+      .filter(l => dep.byCategory[l].original > 0)
+      .sort((a, b) => dep.byCategory[b].original - dep.byCategory[a].original)
+      .slice(0, 10);
+    if (!labels.length) return markEmpty(ctx, '尚無採購金額資料');
     charts[canvasId] = new Chart(ctx, {
       type: 'bar',
       data: {
@@ -404,9 +428,11 @@
           legend: { position: 'bottom', labels: { color: ink(), padding: 14, usePointStyle: true, font: { size: 12 } } },
           tooltip: { callbacks: { label: (c) => `${c.dataset.label}: NT$ ${c.formattedValue}` } }
         },
+        // Horizontal bars keep long category names readable.
+        indexAxis: 'y',
         scales: {
-          x: { ticks: { color: ink() }, grid: { display: false } },
-          y: { beginAtZero: true, ticks: { color: ink(), callback: (v) => 'NT$' + Number(v).toLocaleString() }, grid: { color: grid() } }
+          y: { ticks: { color: ink(), autoSkip: false, font: { size: 11 } }, grid: { display: false } },
+          x: { beginAtZero: true, ticks: { color: ink(), callback: (v) => 'NT$' + Number(v).toLocaleString() }, grid: { color: grid() } }
         },
         maintainAspectRatio: false
       }
@@ -418,7 +444,7 @@
     const ctx = document.getElementById(canvasId);
     if (!ctx) return;
     const t = replacementTimeline(12);
-    if (!t.data.some(v => v > 0)) return;
+    if (!t.data.some(v => v > 0)) return markEmpty(ctx, '未來 12 個月沒有預計汰換的設備（需在設備資料填寫「預期使用年限」）');
     const colors = t.data.map((v, i) => i === 0 ? PALETTE.red : i <= 3 ? PALETTE.orange : PALETTE.blue);
     charts[canvasId] = new Chart(ctx, {
       type: 'bar',
@@ -439,7 +465,7 @@
     const ctx = document.getElementById(canvasId);
     if (!ctx) return;
     const data = vendorSpendSummary(range).slice(0, 8);
-    if (!data.length) return;
+    if (!data.length) return markEmpty(ctx, '這段期間沒有廠商支出紀錄');
     charts[canvasId] = new Chart(ctx, {
       type: 'bar',
       data: {
@@ -467,7 +493,7 @@
     if (w.expired) present.push({ label: '已過保固', value: w.expired, color: PALETTE.red });
     if (w.within90) present.push({ label: '90 天內到期', value: w.within90, color: PALETTE.yellow });
     if (w.covered) present.push({ label: '保固內', value: w.covered, color: PALETTE.green });
-    if (!present.length) return;
+    if (!present.length) return markEmpty(ctx, '尚無資料');
     charts[canvasId] = new Chart(ctx, {
       type: 'doughnut',
       data: {

@@ -200,6 +200,11 @@
     { route: 'features', label: '功能介紹', icon: '✨' }
   ];
 
+  function todayLabel() {
+    const d = new Date();
+    return `${d.getFullYear()}/${d.getMonth() + 1}/${d.getDate()}（${'日一二三四五六'[d.getDay()]}）`;
+  }
+
   function renderShell(route, contentHtml) {
     const user = EPM.auth.getCurrentUser();
     const isAdmin = EPM.auth.isAdmin();
@@ -236,11 +241,12 @@
             <button class="icon-btn mobile-menu-btn" id="mobile-menu-btn" aria-label="開啟選單">☰</button>
             <div class="topbar-title">${esc(NAV_ITEMS.find(n => n.route === route)?.label || '')}</div>
             <div class="topbar-actions">
+              <span class="topbar-date">${todayLabel()}</span>
               <button type="button" class="sync-chip-btn" id="sync-chip">${syncChipHtml()}</button>
               <button class="btn btn-ghost" id="theme-toggle">${themeLabel()}</button>
             </div>
           </header>
-          <main class="content" id="page-content">${contentHtml}</main>
+          <main class="content page-${route}" id="page-content">${contentHtml}</main>
         </div>
       </div>`;
     document.getElementById('logout-btn').addEventListener('click', () => {
@@ -540,7 +546,7 @@
               <tbody>
                 ${s.upcoming.length ? s.upcoming.map(e => `
                   <tr class="row-link" data-nav="#/equipment/${e.id}">
-                    <td data-label="設備">${esc(e.name)}</td>
+                    <td class="cell-wrap" data-label="設備">${esc(e.name)}</td>
                     <td data-label="部門">${esc(e.department || '—')}</td>
                     <td data-label="剩餘天數" class="${e.daysLeft < 0 ? 'text-crit' : e.daysLeft <= 30 ? 'text-warn' : ''}">${e.daysLeft < 0 ? `已逾期 ${Math.abs(e.daysLeft)} 天` : `${e.daysLeft} 天`}</td>
                     <td data-label="狀態">${statusBadge(e.status)}</td>
@@ -582,7 +588,7 @@
       .filter(item => { const def = DASHBOARD_SECTIONS.find(d => d.id === item.id); return !def || !def.adminOnly || isAdmin; })
       .map(item => sections[item.id]).join('');
 
-    renderShell('dashboard', toolbarHtml + bodyHtml);
+    renderShell('dashboard', toolbarHtml + `<div class="dash-grid">${bodyHtml}</div>`);
     const gotoMaint = document.getElementById('goto-maint-btn');
     if (gotoMaint) gotoMaint.addEventListener('click', () => navigate('/maintenance'));
 
@@ -721,10 +727,10 @@
   function eqCellHtml(e, key) {
     switch (key) {
       case 'code': return `<td class="mono" data-label="編號">${esc(e.code)}</td>`;
-      case 'name': return `<td data-label="名稱">${esc(e.name)}</td>`;
-      case 'category': return `<td data-label="類別">${esc(e.category || '—')}</td>`;
+      case 'name': return `<td class="cell-wrap" data-label="名稱">${esc(e.name)}</td>`;
+      case 'category': return `<td class="cell-wrap cell-narrow" data-label="類別">${esc(e.category || '—')}</td>`;
       case 'department': return `<td data-label="部門">${esc(e.department || '—')}</td>`;
-      case 'location': return `<td data-label="位置">${esc(e.location || '—')}</td>`;
+      case 'location': return `<td class="cell-wrap" data-label="位置">${esc(e.location || '—')}</td>`;
       case 'purchaseDate': return `<td class="mono" data-label="採購日期">${fmtDate(e.purchaseDate)}</td>`;
       case 'status': return `<td data-label="狀態">${statusBadge(e.status)}</td>`;
       case 'purchasePrice': return `<td class="mono" data-label="採購金額">${fmtMoney(e.purchasePrice)}</td>`;
@@ -1119,7 +1125,7 @@
               ${replacements.length ? replacements.map(r => `
                 <tr>
                   <td class="mono" data-label="日期">${fmtDate(r.replaceDate)}</td>
-                  <td data-label="原因">${esc(r.reason || '—')}</td>
+                  <td class="cell-wrap" data-label="原因">${esc(r.reason || '—')}</td>
                   <td class="mono" data-label="成本">${fmtMoney(r.cost)}</td>
                   <td data-label="廠商">${esc(r.vendor || '—')}</td>
                   <td data-label="經辦人">${esc(r.operator || '—')}</td>
@@ -1506,7 +1512,7 @@
             <tbody>
               ${warrantyDue.length ? warrantyDue.map(e => `
                 <tr class="row-link" data-nav="#/equipment/${e.id}">
-                  <td data-label="設備">${esc(e.name)}</td>
+                  <td class="cell-wrap" data-label="設備">${esc(e.name)}</td>
                   <td data-label="部門">${esc(e.department || '—')}</td>
                   <td class="mono" data-label="保固到期日">${fmtDate(new Date(e.warrantyEnd).toISOString().slice(0, 10))}</td>
                   <td data-label="狀態" class="${e.daysLeft < 0 ? 'text-crit' : 'text-warn'}">${e.daysLeft < 0 ? `已過保固 ${Math.abs(e.daysLeft)} 天` : `${e.daysLeft} 天內到期`}</td>
@@ -1806,8 +1812,8 @@
     const isAdmin = EPM.auth.isAdmin();
     return plans.map(p => `
       <tr>
-        ${opts.showEquipment ? `<td data-label="設備"><a href="#/equipment/${p.equipmentId}">${eqLabel(p.equipmentId)}</a></td>` : ''}
-        <td data-label="保養項目">${esc(p.title)}</td>
+        ${opts.showEquipment ? `<td class="cell-wrap" data-label="設備"><a href="#/equipment/${p.equipmentId}">${eqLabel(p.equipmentId)}</a></td>` : ''}
+        <td class="cell-wrap" data-label="保養項目">${esc(p.title)}</td>
         <td data-label="週期">${esc(M.intervalLabel(p))}</td>
         <td class="mono" data-label="上次保養">${fmtDate(p.lastDoneDate)}</td>
         <td class="mono" data-label="下次到期">${fmtDate(p.nextDueDate)}</td>
@@ -1825,9 +1831,9 @@
     return logs.map(l => `
       <tr>
         <td class="mono" data-label="日期">${fmtDate(l.date)}</td>
-        ${opts.showEquipment ? `<td data-label="設備"><a href="#/equipment/${l.equipmentId}">${eqLabel(l.equipmentId)}</a></td>` : ''}
+        ${opts.showEquipment ? `<td class="cell-wrap" data-label="設備"><a href="#/equipment/${l.equipmentId}">${eqLabel(l.equipmentId)}</a></td>` : ''}
         <td data-label="類型">${logTypeBadge(l)}</td>
-        <td data-label="項目">${esc(l.title)}${l.description ? `<div class="muted cell-sub">${esc(l.description)}</div>` : ''}</td>
+        <td class="cell-wrap" data-label="項目">${esc(l.title)}${l.description ? `<div class="muted cell-sub">${esc(l.description)}</div>` : ''}</td>
         <td class="mono" data-label="費用">${l.status === 'open' && !l.cost ? '—' : fmtMoney(l.cost)}</td>
         <td data-label="廠商">${esc(l.vendor || '—')}</td>
         <td data-label="經辦人">${esc(l.operator || '—')}</td>
