@@ -170,7 +170,10 @@
   // ------------------------------------------------------------- database
   // `cards` = business-card photos, kept apart from vendors so editing a
   // vendor's phone number does not re-upload its pictures.
-  const COLLECTIONS = ['users', 'equipment', 'replacements', 'quotes', 'plans', 'logs', 'vendors', 'cards', 'activity', 'settings'];
+  // photos = equipment photos and record attachments (invoices, warranty
+  // cards); repairs = repair requests; parts + stock = consumables and their
+  // stock movements (stock level is the sum of movements, so it merges safely).
+  const COLLECTIONS = ['users', 'equipment', 'replacements', 'quotes', 'plans', 'logs', 'vendors', 'cards', 'photos', 'repairs', 'parts', 'stock', 'activity', 'settings'];
   const DB_KEY = 'sg_db';
 
   // The web version keeps the database in IndexedDB (photos would overflow
@@ -316,7 +319,8 @@
         orgName: s.orgName || '設備管家',
         qrBaseUrl: s.qrBaseUrl || SG.config.publicUrl,
         categories: Array.isArray(s.categories) ? s.categories : [],
-        locations: Array.isArray(s.locations) ? s.locations : []
+        locations: Array.isArray(s.locations) ? s.locations : [],
+        stores: Array.isArray(s.stores) ? s.stores : []
       };
     },
     saveSettings(patch) {
@@ -394,6 +398,7 @@
       const r = this.current ? this.current.role : null;
       if (!r) return false;
       if (action === 'admin') return r === 'admin';
+      if (action === 'report') return true; // anyone signed in may file a repair request
       if (action === 'edit') return r === 'admin' || r === 'editor';
       return true;
     }
@@ -572,12 +577,33 @@
       return [...set].sort((a, b) => a.localeCompare(b, 'zh-Hant'));
     },
     // Every expense in one list: purchases, replacements, maintenance/repairs.
+    // Limited to the selected store (if any); consumable purchases have no
+    // store, so they only count when all stores are shown.
     expenses() {
       const out = [];
       DB.all('equipment').forEach((e) => { if (U.num(e.price) > 0 && e.purchaseDate) out.push({ date: e.purchaseDate, kind: '採購', amount: U.num(e.price), vendor: e.vendor || '', eq: e, title: e.name }); });
       DB.all('replacements').forEach((r) => { if (U.num(r.cost) > 0) { const e = DB.get('equipment', r.equipmentId); out.push({ date: r.date, kind: '更換', amount: U.num(r.cost), vendor: r.vendor || '', eq: e, title: r.item }); } });
       DB.all('logs').forEach((l) => { if (U.num(l.cost) > 0) { const e = DB.get('equipment', l.equipmentId); out.push({ date: l.date, kind: l.type || '保養', amount: U.num(l.cost), vendor: l.vendor || '', eq: e, title: l.title }); } });
+      const cur = this.curStore();
+      if (cur) return out.filter((x) => x.eq && x.eq.store === cur);
+      DB.all('stock').forEach((m) => { if (m.kind === '進貨' && U.num(m.cost) > 0) { const p = DB.get('parts', m.partId); out.push({ date: m.date, kind: '耗材', amount: U.num(m.cost), vendor: m.vendor || '', eq: null, title: p ? p.name : '耗材' }); } });
       return out;
-    }
+    },
+
+    // ---- stores (分店): the selection is per device
+    stores() { return DB.settings().stores; },
+    curStore() {
+      const s = SG.store.get('sg_cur_store');
+      return s && this.stores().includes(s) ? s : '';
+    },
+    setStore(s) { SG.store.set('sg_cur_store', s || null); },
+    inStore(eq) { const cur = this.curStore(); return !cur || !!(eq && eq.store === cur); },
+    inStoreRec(r) { return this.inStore(DB.get('equipment', r.equipmentId)); },
+    eqs() { return DB.all('equipment').filter((e) => this.inStore(e)); },
+
+    // ---- consumables
+    stockOf(partId) { return DB.all('stock').filter((m) => m.partId === partId).reduce((t, m) => t + U.num(m.qty), 0); },
+    lowParts() { return DB.all('parts').filter((p) => p.minQty !== '' && p.minQty != null && this.stockOf(p.id) <= U.num(p.minQty)); },
+    openRepairs() { return DB.all('repairs').filter((r) => (r.status === '待處理' || r.status === '處理中') && this.inStoreRec(r)); }
   });
 })();

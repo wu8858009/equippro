@@ -134,7 +134,8 @@ class Handler(SimpleHTTPRequestHandler):
                 name = os.path.basename((q.get('name') or ['export.csv'])[0]) or 'export.csv'
                 text = self._body()
                 ext = os.path.splitext(name)[1].lower()
-                types = {'.csv': ('CSV 檔 (*.csv)', '所有檔案 (*.*)'), '.jpg': ('JPEG 圖片 (*.jpg)', '所有檔案 (*.*)')}.get(
+                types = {'.csv': ('CSV 檔 (*.csv)', '所有檔案 (*.*)'), '.jpg': ('JPEG 圖片 (*.jpg)', '所有檔案 (*.*)'),
+                         '.xlsx': ('Excel 活頁簿 (*.xlsx)', '所有檔案 (*.*)')}.get(
                     ext, ('JSON 檔 (*.json)', '所有檔案 (*.*)'))
                 res = window.create_file_dialog(webview.FileDialog.SAVE, directory=os.path.join(os.path.expanduser('~'), 'Documents'),
                                                 save_filename=name, file_types=types)

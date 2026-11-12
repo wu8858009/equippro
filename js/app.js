@@ -157,12 +157,32 @@
     if (SG.sync.enabled()) SG.sync.syncNow().catch(() => {});
   }
 
+  // ------------------------------------------------------------ theme
+  SG.theme = {
+    get() { return SG.store.get('sg_theme') || 'auto'; },
+    apply() {
+      const t = this.get();
+      if (t === 'auto') document.documentElement.removeAttribute('data-theme');
+      else document.documentElement.dataset.theme = t;
+      const dark = t === 'dark' || (t === 'auto' && window.matchMedia('(prefers-color-scheme: dark)').matches);
+      const meta = document.querySelector('meta[name=theme-color]');
+      if (meta) meta.content = dark ? '#0b1220' : '#0f766e';
+    },
+    set(t) {
+      SG.store.set('sg_theme', t === 'auto' ? null : t);
+      try { localStorage.setItem('sg_theme_boot', t); } catch (e) { /* ignore */ }
+      this.apply();
+    }
+  };
+
   // ------------------------------------------------------------ shell
   const NAV = [
     ['#/dash', '🏠', '總覽', '^/dash'],
-    ['#/equipment', '🗄️', '設備', '^/(equipment|eq/)'],
+    ['#/equipment', '🗄️', '設備', '^/(equipment|eq/|qr/)'],
+    ['#/repairs', '🧰', '報修', '^/repair'],
     ['#/maint', '🛠️', '保養維修', '^/maint'],
     ['#/quotes', '💰', '報價比價', '^/quotes'],
+    ['#/parts', '📦', '耗材庫存', '^/parts'],
     ['#/reports', '📊', '統計報表', '^/reports'],
     ['#/vendors', '📇', '廠商', '^/vendors'],
     ['#/labels', '🏷️', 'QR 標籤', '^/labels'],
@@ -170,42 +190,76 @@
     ['#/users', '👥', '帳號管理', '^/users', 'admin'],
     ['#/settings', '⚙️', '設定', '^/settings']
   ];
-  const MOBILE_NAV = ['#/dash', '#/equipment', '#/maint', '#/quotes'];
+  const MOBILE_NAV = ['#/dash', '#/equipment', '#/repairs', '#/maint'];
+  const SHORT = { '保養維修': '保養', '報價比價': '報價', '耗材庫存': '耗材', '統計報表': '報表' };
 
   const shell = (SG.shell = {
     render() {
       const me = Auth.current;
       const items = NAV.filter((n) => !n[4] || Auth.can(n[4]));
+      const stores = SG.q.stores();
+      const cur = SG.q.curStore();
+      const storeSel = (id) => stores.length ? `<select class="store-sel" id="${id}" aria-label="切換分店"><option value="">🏬 全部分店</option>${stores.map((x) => `<option ${x === cur ? 'selected' : ''}>${esc(x)}</option>`).join('')}</select>` : '';
+      const link = ([h, i, l, m]) => `<a href="${h}" data-match="${m}"><span>${i}</span>${l}${h === '#/repairs' ? '<b class="nav-count" hidden></b>' : ''}</a>`;
       root().innerHTML = `
         <aside class="side">
           <div class="brand"><img src="icons/icon-192.png" alt=""><div><b>設備管家</b><small id="org-name">${esc(DB.settings().orgName)}</small></div></div>
-          <nav class="nav">${items.map(([h, i, l, m]) => `<a href="${h}" data-match="${m}"><span>${i}</span>${l}</a>`).join('')}</nav>
+          ${storeSel('store-side')}
+          <form class="side-search" id="side-search"><input type="search" placeholder="🔍 搜尋（Ctrl+K）" aria-label="全站搜尋"></form>
+          <nav class="nav">${items.map(link).join('')}</nav>
           <div class="side-foot"><div class="me">👤 ${esc(me.name)} <small>${esc(Auth.ROLES[me.role])}</small></div><div id="sync-pill"></div></div>
         </aside>
         <header class="topbar">
           <div class="brand"><img src="icons/icon-192.png" alt=""><b>設備管家</b></div>
-          <span id="sync-pill-m"></span>
+          <div class="top-right">${storeSel('store-top')}<a href="#/search" class="icon-btn top-search" aria-label="搜尋">🔍</a><span id="sync-pill-m"></span></div>
         </header>
         <main id="main"></main>
         <nav class="nav bottom-nav">
-          ${items.filter((n) => MOBILE_NAV.includes(n[0])).map(([h, i, l, m]) => `<a href="${h}" data-match="${m}"><span>${i}</span>${l.replace('保養維修', '保養').replace('報價比價', '報價')}</a>`).join('')}
-          <a href="#" id="more-btn" data-match="^/(reports|vendors|labels|activity|users|settings)"><span>☰</span>更多</a>
+          ${items.filter((n) => MOBILE_NAV.includes(n[0])).map(([h, i, l, m]) => link([h, i, SHORT[l] || l, m])).join('')}
+          <a href="#" id="more-btn" data-match="^/(quotes|parts|reports|vendors|labels|activity|users|settings|search)"><span>☰</span>更多</a>
         </nav>`;
       UI.$('#more-btn').onclick = (e) => {
         e.preventDefault();
         const m = UI.modal({
           title: '更多功能',
-          body: `<div class="more-grid">${items.filter((n) => !MOBILE_NAV.includes(n[0])).map(([h, i, l]) => `<a href="${h}" class="more-item"><span>${i}</span>${l}</a>`).join('')}</div>
+          body: `<div class="more-grid"><a href="#/search" class="more-item"><span>🔍</span>搜尋</a>${items.filter((n) => !MOBILE_NAV.includes(n[0])).map(([h, i, l]) => `<a href="${h}" class="more-item"><span>${i}</span>${l}</a>`).join('')}</div>
             <p class="small muted center">👤 ${esc(me.name)}（${esc(Auth.ROLES[me.role])}）</p>`
         });
         UI.$$('.more-item', m.body).forEach((a) => a.addEventListener('click', () => m.close()));
       };
+      UI.$$('.store-sel').forEach((sel) => (sel.onchange = () => {
+        SG.q.setStore(sel.value);
+        UI.$$('.store-sel').forEach((o) => (o.value = sel.value));
+        UI.toast(sel.value ? '只顯示：' + sel.value : '顯示全部分店');
+        shell.counts();
+        UI.render();
+      }));
+      UI.$('#side-search').onsubmit = (e) => {
+        e.preventDefault();
+        const q = UI.$('#side-search input').value.trim();
+        UI.go(q ? '#/search/' + encodeURIComponent(q) : '#/search');
+      };
       this.syncPill();
+      this.counts();
     },
     refresh() { const o = UI.$('#org-name'); if (o) o.textContent = DB.settings().orgName; },
+    counts() {
+      const n = SG.q.openRepairs().length;
+      UI.$$('.nav-count').forEach((b) => { b.textContent = n; b.hidden = !n; });
+    },
     syncPill() {
       const html = SG.sync.enabled() ? `<a href="#/settings" class="sync-pill" title="${esc(SG.sync.message)}">${SG.syncBadge()}</a>` : '';
       ['#sync-pill', '#sync-pill-m'].forEach((s) => { const el = UI.$(s); if (el) el.innerHTML = html; });
+    }
+  });
+
+  document.addEventListener('keydown', (e) => {
+    if (!Auth.current) return;
+    const typing = /INPUT|TEXTAREA|SELECT/.test((document.activeElement || {}).tagName || '');
+    if (((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'k') || (e.key === '/' && !typing)) {
+      e.preventDefault();
+      const side = UI.$('#side-search input');
+      if (side && side.offsetParent) side.focus(); else UI.go('#/search');
     }
   });
 
@@ -228,7 +282,7 @@
     if (!location.hash || location.hash === '#' || location.hash === '#/') location.hash = '#/dash';
     UI.render();
     SG.sync.start();
-    DB.onChange((c) => { if (c === 'users') { Auth.refresh(); } if (c === 'settings') shell.refresh(); rerender(); });
+    DB.onChange((c) => { if (c === 'users') { Auth.refresh(); } if (c === 'settings') shell.refresh(); shell.counts(); rerender(); });
   }
 
   // ------------------------------------------------------------ boot
@@ -236,6 +290,8 @@
     try {
       const desktopDb = await initDesktop();
       await DB.load(desktopDb);
+      SG.theme.apply();
+      window.matchMedia('(prefers-color-scheme: dark)').addEventListener('change', () => SG.theme.apply());
       if (!SG.desktop && 'serviceWorker' in navigator && location.protocol === 'https:') {
         navigator.serviceWorker.register('sw.js').catch(() => {});
       }

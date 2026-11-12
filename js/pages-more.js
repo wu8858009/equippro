@@ -34,7 +34,7 @@
   let quoteSearch = '';
   UI.route('/quotes', function (main) {
     const all = DB.all('quotes');
-    main.innerHTML = `${UI.pageHead('報價比價', `${canEdit() ? `<button class="btn primary" id="q-add">＋ 新增報價</button>` : ''}<button class="btn" id="q-export">匯出 CSV</button>`, '同一個「報價項目」的各家報價會放在一起，以含稅價比較')}
+    main.innerHTML = `${UI.pageHead('報價比價', `${canEdit() ? `<button class="btn primary" id="q-add">＋ 新增報價</button>` : ''}<button class="btn" id="q-export">匯出 Excel</button>`, '同一個「報價項目」的各家報價會放在一起，以含稅價比較')}
       <div class="toolbar card"><input type="search" id="q-q" placeholder="🔍 搜尋項目、廠商…" value="${esc(quoteSearch)}"></div>
       <div id="q-list"></div>`;
     const draw = () => {
@@ -67,7 +67,7 @@
         const t = qParts(q);
         rows.push([q.item, q.vendor, q.contact || '', q.date || '', q.validUntil || '', t.excl, t.tax, t.incl, t.rate, q.taxMode === 'excl' ? '未稅' : '含稅', q.adopted ? '是' : '', q.equipmentId ? Q.eqName(q.equipmentId) : '', q.note || '']);
       });
-      U.download(`報價比價_${U.today()}.csv`, U.csv(rows));
+      SG.excel.save(`報價比價_${U.today()}.xlsx`, [{ name: '報價比價', rows }]).catch((e) => UI.toast(e.message, 'error'));
     };
     draw();
   });
@@ -84,7 +84,7 @@
     const l = UI.$('#m-log', main); if (l) l.onclick = () => F.log(null);
     const body = UI.$('#m-body', main);
     if (mState.tab === 'plans') {
-      const plans = DB.all('plans').filter((p) => DB.get('equipment', p.equipmentId)).map((p) => ({ p, s: Q.planStatus(p) }));
+      const plans = DB.all('plans').filter((p) => DB.get('equipment', p.equipmentId) && Q.inStoreRec(p)).map((p) => ({ p, s: Q.planStatus(p) }));
       const cnt = (k) => plans.filter((x) => k === 'due' ? (x.s.key === 'overdue' || x.s.key === 'soon') : k === 'all' ? true : x.s.key === k).length;
       body.innerHTML = `<div class="chips">${[['due', '待辦（逾期＋即將到期）'], ['overdue', '逾期'], ['ok', '正常'], ['paused', '暫停'], ['all', '全部']].map(([v, lab]) => `<button class="chip ${mState.filter === v ? 'on' : ''}" data-f="${v}">${lab} <i>${cnt(v)}</i></button>`).join('')}</div>
         <div id="m-plans"></div>`;
@@ -104,12 +104,12 @@
       UI.$$('[data-pe]', body).forEach((b) => (b.onclick = () => F.plan(DB.get('plans', b.dataset.pe))));
       UI.$$('[data-pd]', body).forEach((b) => (b.onclick = async () => { const p = DB.get('plans', b.dataset.pd); if (await F.remove('plans', p, p.title)) UI.render(); }));
     } else {
-      const logs = DB.all('logs');
+      const logs = DB.all('logs').filter((l) => Q.inStoreRec(l));
       const months = [...new Set(logs.map((l) => (l.date || '').slice(0, 7)).filter(Boolean))].sort().reverse();
       body.innerHTML = `<div class="toolbar card">
         <select id="m-type"><option value="">全部類型</option>${['保養', '維修', '檢查'].map((t) => `<option ${mState.type === t ? 'selected' : ''}>${t}</option>`).join('')}</select>
         <select id="m-month"><option value="">全部月份</option>${months.map((m) => `<option ${mState.month === m ? 'selected' : ''}>${m}</option>`).join('')}</select>
-        <button class="btn" id="m-exp">匯出 CSV</button></div><div id="m-logs"></div>`;
+        <button class="btn" id="m-print">🖨️ 列印</button><button class="btn" id="m-exp">匯出 Excel</button></div><div id="m-logs"></div>`;
       const rows = logs.filter((l) => (!mState.type || l.type === mState.type) && (!mState.month || (l.date || '').startsWith(mState.month)))
         .sort((a, b) => (b.date || '').localeCompare(a.date || '') || b.updatedAt - a.updatedAt);
       const sum = rows.reduce((t, l) => t + U.num(l.cost), 0);
@@ -123,7 +123,9 @@
       ], { empty: '沒有紀錄' });
       UI.$('#m-type', body).onchange = (e) => { mState.type = e.target.value; UI.render(); };
       UI.$('#m-month', body).onchange = (e) => { mState.month = e.target.value; UI.render(); };
-      UI.$('#m-exp', body).onclick = () => U.download(`保養維修紀錄_${U.today()}.csv`, U.csv([['日期', '類型', '設備', '項目', '處理內容', '廠商', '經手人', '費用']].concat(rows.map((l) => [l.date, l.type, Q.eqName(l.equipmentId), l.title, l.content || '', l.vendor || '', l.by || '', U.num(l.cost) || '']))));
+      const logRows = () => rows.map((l) => [l.date, l.type, Q.eqName(l.equipmentId), l.title, l.content || '', l.vendor || '', l.by || '', U.num(l.cost) || '']);
+      UI.$('#m-exp', body).onclick = () => SG.excel.save(`保養維修紀錄_${U.today()}.xlsx`, [{ name: '保養維修紀錄', rows: [['日期', '類型', '設備', '項目', '處理內容', '廠商', '經手人', '費用']].concat(logRows()) }]).catch((e) => UI.toast(e.message, 'error'));
+      UI.$('#m-print', body).onclick = () => SG.print('保養維修紀錄' + (mState.month ? '（' + mState.month + '）' : ''), `<p class="pd-sub">共 ${rows.length} 筆・費用合計 ${U.money(sum)}</p>` + SG.printTable(['日期', '類型', '設備', '項目', '處理內容', '廠商', '經手人', '費用'], logRows().map((r) => { r[7] = r[7] ? U.money(r[7]) : ''; return r; }), { numCols: [7] }), { landscape: true });
       UI.$$('[data-le]', body).forEach((b) => (b.onclick = () => F.log(DB.get('logs', b.dataset.le))));
       UI.$$('[data-ld]', body).forEach((b) => (b.onclick = async () => { const l = DB.get('logs', b.dataset.ld); if (await F.remove('logs', l, l.title)) UI.render(); }));
     }
@@ -310,30 +312,50 @@
         months.push({ label: (d.getMonth() + 1) + '月', value: sum(rows.filter((x) => x.date.startsWith(k))) });
       }
     }
-    const eqs = DB.all('equipment');
-    const kinds = ['採購', '更換', '保養', '維修', '檢查'];
+    const eqs = Q.eqs();
+    const kinds = ['採購', '更換', '保養', '維修', '檢查', '耗材'];
+    const KIND_ICON = { 採購: '🛒', 更換: '🔁', 保養: '🧽', 維修: '🛠️', 檢查: '🔎', 耗材: '📦' };
+    const shownKinds = kinds.filter((k) => (k !== '檢查' && k !== '耗材') || rows.some((x) => x.kind === k));
+    const eqLabel = (x) => (x.eq ? `${x.eq.code || ''} ${x.eq.name}` : x.kind === '耗材' ? '（耗材進貨）' : '（已刪除的設備）');
     main.innerHTML = `${UI.pageHead('統計報表', `<select id="r-period">
         <option value="year" ${rPeriod === 'year' ? 'selected' : ''}>今年</option>
         <option value="12m" ${rPeriod === '12m' ? 'selected' : ''}>近 12 個月</option>
         ${years.filter((x) => x !== y).map((x) => `<option value="${x}" ${rPeriod === x ? 'selected' : ''}>${x} 年</option>`).join('')}
         <option value="all" ${rPeriod === 'all' ? 'selected' : ''}>全部期間</option></select>
-        <button class="btn" id="r-exp">匯出支出明細</button>`, `${label}・含稅金額`)}
+        <button class="btn" id="r-print">🖨️ 列印報表</button><button class="btn" id="r-exp">匯出 Excel</button>`, `${label}・含稅金額${Q.curStore() ? '・分店：' + esc(Q.curStore()) : ''}`)}
       <div class="kpis">
         <div class="kpi"><span class="kpi-icon">💰</span><span class="kpi-val">${U.money(sum(rows))}</span><span class="kpi-lab">總支出</span></div>
-        ${kinds.filter((k) => k !== '檢查' || rows.some((x) => x.kind === k)).map((k) => `<div class="kpi"><span class="kpi-icon">${{ 採購: '🛒', 更換: '🔁', 保養: '🧽', 維修: '🛠️', 檢查: '🔎' }[k]}</span><span class="kpi-val">${U.money(sum(rows.filter((x) => x.kind === k)))}</span><span class="kpi-lab">${k}・${rows.filter((x) => x.kind === k).length} 筆</span></div>`).join('')}
+        ${shownKinds.map((k) => `<div class="kpi"><span class="kpi-icon">${KIND_ICON[k]}</span><span class="kpi-val">${U.money(sum(rows.filter((x) => x.kind === k)))}</span><span class="kpi-lab">${k}・${rows.filter((x) => x.kind === k).length} 筆</span></div>`).join('')}
       </div>
       <section class="card"><div class="card-head"><h2>${rPeriod === 'all' ? '每年支出' : '每月支出'}</h2></div>${UI.barChart(months)}</section>
       <div class="grid-2">
         <section class="card"><div class="card-head"><h2>依設備分類</h2></div>${UI.rankBars(by((x) => x.eq && x.eq.category))}</section>
         <section class="card"><div class="card-head"><h2>依廠商</h2></div>${UI.rankBars(by((x) => x.vendor))}</section>
-        <section class="card"><div class="card-head"><h2>花費最多的設備</h2></div>${UI.rankBars(by((x) => x.eq ? `${x.eq.code || ''} ${x.eq.name}` : '（已刪除的設備）'))}</section>
+        <section class="card"><div class="card-head"><h2>花費最多的設備</h2></div>${UI.rankBars(by(eqLabel))}</section>
         <section class="card"><div class="card-head"><h2>依放置位置</h2></div>${UI.rankBars(by((x) => x.eq && x.eq.location))}</section>
         <section class="card"><div class="card-head"><h2>設備狀態</h2></div>${UI.rankBars(SG.STATUSES.map((s) => ({ label: s, value: eqs.filter((e) => (e.status || '使用中') === s).length })), { money: false })}</section>
         <section class="card"><div class="card-head"><h2>各分類設備數</h2></div>${UI.rankBars((() => { const m = {}; eqs.filter((e) => e.status !== '已汰換').forEach((e) => { const k = e.category || '（未分類）'; m[k] = (m[k] || 0) + 1; }); return Object.entries(m).map(([label, value]) => ({ label, value })); })(), { money: false })}</section>
       </div>`;
     UI.$('#r-period', main).onchange = (e) => { rPeriod = e.target.value; UI.render(); };
-    UI.$('#r-exp', main).onclick = () => U.download(`支出明細_${label}_${U.today()}.csv`, U.csv([['日期', '類別', '設備編號', '設備', '分類', '位置', '項目', '廠商', '金額（含稅）']].concat(
-      rows.slice().sort((a, b) => a.date.localeCompare(b.date)).map((x) => [x.date, x.kind, x.eq ? x.eq.code || '' : '', x.eq ? x.eq.name : '（已刪除）', x.eq ? x.eq.category || '' : '', x.eq ? x.eq.location || '' : '', x.title || '', x.vendor, x.amount]))));
+    const detail = () => rows.slice().sort((a, b) => a.date.localeCompare(b.date)).map((x) => [x.date, x.kind, x.eq ? x.eq.code || '' : '', x.eq ? x.eq.name : eqLabel(x), x.eq ? x.eq.store || '' : '', x.eq ? x.eq.category || '' : '', x.eq ? x.eq.location || '' : '', x.title || '', x.vendor, x.amount]);
+    const ranked = (fn) => by(fn).sort((a, b) => b.value - a.value).map((d) => [d.label, d.value]);
+    UI.$('#r-exp', main).onclick = () => SG.excel.save(`支出報表_${label}_${U.today()}.xlsx`, [
+      { name: '支出明細', rows: [['日期', '類別', '設備編號', '設備', '分店', '分類', '位置', '項目', '廠商', '金額（含稅）']].concat(detail()) },
+      { name: rPeriod === 'all' ? '每年' : '每月', rows: [['期間', '金額']].concat(months.map((m) => [m.label, m.value])) },
+      { name: '依類別', rows: [['類別', '金額', '筆數']].concat(shownKinds.map((k) => [k, sum(rows.filter((x) => x.kind === k)), rows.filter((x) => x.kind === k).length])) },
+      { name: '依分類', rows: [['設備分類', '金額']].concat(ranked((x) => x.eq && x.eq.category)) },
+      { name: '依廠商', rows: [['廠商', '金額']].concat(ranked((x) => x.vendor)) },
+      { name: '依設備', rows: [['設備', '金額']].concat(ranked(eqLabel)) }
+    ]).catch((e) => UI.toast(e.message, 'error'));
+    UI.$('#r-print', main).onclick = () => {
+      const t = (title, data) => `<h2>${title}</h2>` + SG.printTable(['項目', '金額', '占比'], data.map(([l, v]) => [l, U.money(v), sum(rows) ? (v / sum(rows) * 100).toFixed(1) + '%' : '']), { numCols: [1, 2] });
+      SG.print(`支出報表（${label}）`, `
+        ${SG.printTable(['總支出', ...shownKinds], [[U.money(sum(rows)), ...shownKinds.map((k) => U.money(sum(rows.filter((x) => x.kind === k))))]], { numCols: shownKinds.map((_, i) => i + 1).concat(0) })}
+        <h2>${rPeriod === 'all' ? '每年支出' : '每月支出'}</h2><div class="pd-chart">${UI.barChart(months)}</div>
+        ${SG.printTable(months.map((m) => m.label), [months.map((m) => m.value ? Math.round(m.value).toLocaleString() : '—')], { numCols: months.map((_, i) => i) })}
+        <div class="pd-cols">${t('依設備分類', ranked((x) => x.eq && x.eq.category).slice(0, 15))}${t('依廠商', ranked((x) => x.vendor).slice(0, 15))}</div>
+        ${t('花費最多的設備（前 20）', ranked(eqLabel).slice(0, 20))}`);
+    };
   });
 
   // ====================================================== QR labels
@@ -341,7 +363,7 @@
   let labelSize = 'm', labelFilter = '';
   SG.labels = {
     svg(e) {
-      const url = DB.settings().qrBaseUrl.replace(/#.*$/, '') + '#/eq/' + e.id;
+      const url = DB.settings().qrBaseUrl.replace(/#.*$/, '') + '#/qr/' + e.id; // opens the quick-action page (報修／保養／履歷)
       const qr = window.qrcode(0, 'M');
       qr.addData(url);
       qr.make();
@@ -351,7 +373,7 @@
       const org = DB.settings().orgName;
       return `<div class="labels size-${size}">${list.map((e) => `<div class="label">
         <div class="label-qr">${this.svg(e)}</div>
-        <div class="label-text"><div class="label-org">${esc(org)}</div><div class="label-name">${esc(e.name)}</div>
+        <div class="label-text"><div class="label-org">${esc(org)}${e.store ? '・' + esc(e.store) : ''}</div><div class="label-name">${esc(e.name)}</div>
         <div class="label-code">${esc(e.code || '')}</div>${e.location ? `<div class="label-loc">${esc(e.location)}</div>` : ''}</div></div>`).join('')}</div>`;
     },
     print(list, size) {
@@ -374,7 +396,7 @@
     }
   };
   UI.route('/labels', function (main) {
-    const eqs = DB.all('equipment').filter((e) => e.status !== '已汰換').sort((a, b) => (a.code || '').localeCompare(b.code || '', undefined, { numeric: true }));
+    const eqs = Q.eqs().filter((e) => e.status !== '已汰換').sort((a, b) => (a.code || '').localeCompare(b.code || '', undefined, { numeric: true }));
     main.innerHTML = `${UI.pageHead('QR 標籤列印', `<select id="l-size"><option value="s" ${labelSize === 's' ? 'selected' : ''}>小（4×2.5 公分）</option><option value="m" ${labelSize === 'm' ? 'selected' : ''}>中（6×3.5 公分）</option><option value="l" ${labelSize === 'l' ? 'selected' : ''}>大（8×5 公分）</option></select>
       <button class="btn primary" id="l-print">🖨️ 列印已選（<span id="l-n">0</span>）</button>`, '勾選要列印的設備，貼在設備上，手機掃描即可查看保養與更換紀錄')}
       <div class="toolbar card"><input type="search" id="l-q" placeholder="🔍 篩選名稱、編號、位置…" value="${esc(labelFilter)}">
@@ -516,20 +538,24 @@
           <div class="field"><label>QR 標籤連結網址</label><input id="s-qr" value="${esc(s.qrBaseUrl)}"><small class="hint">手機掃描標籤時打開的網頁版位址</small></div>
           <div class="field"><label>常用分類（用逗號分隔）</label><input id="s-cats" value="${esc(s.categories.join('，'))}" placeholder="廚房設備，空調，資訊設備"></div>
           <div class="field"><label>常用位置（用逗號分隔）</label><input id="s-locs" value="${esc(s.locations.join('，'))}" placeholder="一樓廚房，二樓辦公室"></div>
+          <div class="field span-2"><label>分店（用逗號分隔，只有一家店可留空）</label><input id="s-stores" value="${esc(s.stores.join('，'))}" placeholder="碧潭店，新店店"><small class="hint">設定後，設備可以指定分店，左上角可切換只看某一家分店</small></div>
         </div>
         <div class="btn-row"><button class="btn primary" id="s-save">儲存設定</button></div>
       </section>` : ''}
       <section class="card">
         <div class="card-head"><h2>備份與還原</h2></div>
         <p class="small muted">建議定期匯出備份檔（.json），換電腦或資料出問題時可以還原。</p>
-        <div class="btn-row"><button class="btn" id="s-backup">匯出完整備份</button>${admin ? `<button class="btn" id="s-restore">從備份還原</button>` : ''}</div>
+        <div class="btn-row"><button class="btn" id="s-backup">匯出完整備份</button><button class="btn" id="s-xlsx">匯出全部資料（Excel）</button>${admin ? `<button class="btn" id="s-restore">從備份還原</button>` : ''}</div>
         <input type="file" id="s-file" accept=".json,application/json" hidden>
       </section>
       <section class="card">
         <div class="card-head"><h2>這台裝置</h2></div>
         <p class="small muted">${SG.desktop ? '電腦版，資料存在 ' + esc(SG.desktop.dataPath || '本機') : '網頁版，資料存在這個瀏覽器'}・版本 ${SG.config.version}</p>
+        <div class="field" style="max-width:320px"><label>外觀</label><select id="s-theme">
+          ${[['auto', '跟隨系統'], ['light', '淺色'], ['dark', '深色']].map(([v, l]) => `<option value="${v}" ${SG.theme.get() === v ? 'selected' : ''}>${l}</option>`).join('')}</select></div>
         <div class="btn-row"><button class="btn danger-ghost" id="s-wipe">清除這台裝置的資料</button></div>
       </section>`;
+    UI.$('#s-theme', main).onchange = (ev) => SG.theme.set(ev.target.value);
     const on = (sel, fn) => { const el = UI.$(sel, main); if (el) el.onclick = fn; };
     on('#s-pw', () => passwordForm(me, true));
     on('#s-logout', () => { SG.log('登出', me.name); DB.saveNow(); Auth.logout(); location.hash = ''; location.reload(); });
@@ -548,11 +574,25 @@
     });
     on('#s-save', () => {
       const split = (v) => v.split(/[,，、\n]/).map((x) => x.trim()).filter(Boolean);
-      DB.saveSettings({ orgName: UI.$('#s-org', main).value.trim() || '設備管家', qrBaseUrl: UI.$('#s-qr', main).value.trim() || SG.config.publicUrl, categories: split(UI.$('#s-cats', main).value), locations: split(UI.$('#s-locs', main).value) });
+      DB.saveSettings({ orgName: UI.$('#s-org', main).value.trim() || '設備管家', qrBaseUrl: UI.$('#s-qr', main).value.trim() || SG.config.publicUrl, categories: split(UI.$('#s-cats', main).value), locations: split(UI.$('#s-locs', main).value), stores: [...new Set(split(UI.$('#s-stores', main).value))] });
       SG.log('修改系統設定', '');
       UI.toast('設定已儲存');
-      SG.shell.refresh();
+      SG.shell.render();
       UI.render();
+    });
+    on('#s-xlsx', () => {
+      const eqName = (id) => { const e = DB.get('equipment', id); return e ? `${e.code || ''} ${e.name}` : ''; };
+      const n = (v) => (v === '' || v == null ? '' : U.num(v));
+      SG.excel.save(`設備管家全部資料_${U.today()}.xlsx`, [
+        { name: '設備', rows: [SG.EQ_COLS.map((c) => c[1])].concat(DB.all('equipment').sort((a, b) => (a.code || '').localeCompare(b.code || '', undefined, { numeric: true })).map((e) => SG.EQ_COLS.map((c) => e[c[0]] == null ? '' : e[c[0]]))) },
+        { name: '更換紀錄', rows: [['日期', '設備', '更換項目', '原因', '舊品', '新品', '廠商', '費用', '新品保固到期', '備註']].concat(DB.all('replacements').sort((a, b) => (a.date || '').localeCompare(b.date || '')).map((r) => [r.date, eqName(r.equipmentId), r.item, r.reason, r.oldInfo, r.newInfo, r.vendor, n(r.cost), r.warrantyUntil, r.note])) },
+        { name: '保養維修紀錄', rows: [['日期', '類型', '設備', '項目', '處理內容', '廠商', '經手人', '費用']].concat(DB.all('logs').sort((a, b) => (a.date || '').localeCompare(b.date || '')).map((l) => [l.date, l.type, eqName(l.equipmentId), l.title, l.content, l.vendor, l.by, n(l.cost)])) },
+        { name: '保養排程', rows: [['設備', '保養項目', '每隔', '單位', '上次', '下次', '廠商', '啟用']].concat(DB.all('plans').map((p) => [eqName(p.equipmentId), p.title, p.intervalValue, UNIT[p.intervalUnit] || '', p.lastDone, p.nextDue, p.vendor, p.active ? '是' : '否'])) },
+        { name: '報修', rows: [['報修時間', '設備', '問題', '描述', '緊急', '報修人', '狀態', '廠商', '完成日', '處理結果', '費用']].concat(DB.all('repairs').sort((a, b) => a.reportedAt - b.reportedAt).map((r) => [U.fmtTime(r.reportedAt), eqName(r.equipmentId), r.title, r.desc, r.urgency, r.reporter, r.status, r.vendor, r.doneDate, r.resolution, n(r.cost)])) },
+        { name: '報價', rows: [['報價項目', '廠商', '報價日期', '未稅價', '稅額', '含稅價', '稅率(%)', '已採用', '相關設備', '備註']].concat(DB.all('quotes').map((q) => { const t = qParts(q); return [q.item, q.vendor, q.date, t.excl, t.tax, t.incl, t.rate, q.adopted ? '是' : '', eqName(q.equipmentId), q.note]; })) },
+        { name: '廠商', rows: [['廠商', '類別', '聯絡人', '電話', '手機', 'Email', '統編', '地址', '備註']].concat(DB.all('vendors').map((v) => [v.name, v.category, v.contact, v.phone, v.mobile, v.email, v.taxId, v.address, v.note])) },
+        { name: '耗材庫存', rows: [['耗材', '規格', '單位', '目前庫存', '安全量', '存放位置', '廠商', '參考單價']].concat(DB.all('parts').map((p) => [p.name, p.spec, p.unit, Q.stockOf(p.id), n(p.minQty), p.location, p.vendor, n(p.price)])) }
+      ]).then(() => SG.log('匯出全部資料（Excel）', '')).catch((e) => UI.toast(e.message, 'error'));
     });
     on('#s-backup', () => {
       const data = {}; DB.COLLECTIONS.forEach((c) => (data[c] = DB.data[c]));
