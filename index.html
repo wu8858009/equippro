@@ -8,6 +8,34 @@
   <link rel="stylesheet" href="css/style.css" />
 </head>
 <body>
+  <!-- Launch animation: shown until the app has loaded and rendered (see hideSplash in js/app.js). -->
+  <div id="splash" aria-hidden="true">
+    <div class="splash-center">
+      <div class="splash-logo">
+        <span class="splash-ring"></span><span class="splash-ring r2"></span>
+        <svg viewBox="0 0 256 256" class="splash-mark">
+          <defs>
+            <linearGradient id="splash-grad" x1="0" y1="0" x2="1" y2="1">
+              <stop offset="0" stop-color="#4b98f5" /><stop offset="1" stop-color="#1c5cb0" />
+            </linearGradient>
+          </defs>
+          <rect width="256" height="256" rx="56" fill="url(#splash-grad)" />
+          <g class="splash-monitor" fill="#fff">
+            <rect x="53" y="56" width="150" height="108" rx="16" />
+            <rect x="111" y="163" width="34" height="22" />
+            <rect x="88" y="184" width="80" height="14" rx="7" />
+          </g>
+          <path class="splash-check" d="M84 114 L108 138 L170 88" fill="none" stroke="#2a78d6" stroke-width="18" stroke-linecap="round" stroke-linejoin="round" />
+        </svg>
+      </div>
+      <div class="splash-title">
+        <span>E</span><span>q</span><span>u</span><span>i</span><span>p</span><span>P</span><span>r</span><span>o</span>
+      </div>
+      <div class="splash-sub">企業級設備更換紀錄與價位管理系統</div>
+      <div class="splash-bar"><span></span></div>
+    </div>
+  </div>
+  <script>window.__splashStart = Date.now();</script>
   <div id="app-root"></div>
   <div id="modal-root"></div>
   <div id="toast-root"></div>

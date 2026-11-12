@@ -2783,6 +2783,21 @@
     }
   }
 
+  // Fades the launch animation out once the app has rendered, keeping it on
+  // screen long enough for the logo animation to finish.
+  const SPLASH_MIN_MS = 1700;
+  function hideSplash() {
+    const el = document.getElementById('splash');
+    if (!el || el.classList.contains('splash-out')) return;
+    const reduce = window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+    const elapsed = Date.now() - (window.__splashStart || Date.now());
+    const wait = reduce ? 0 : Math.max(0, SPLASH_MIN_MS - elapsed);
+    setTimeout(() => {
+      el.classList.add('splash-out');
+      setTimeout(() => el.remove(), 600);
+    }, wait);
+  }
+
   window.EPM.app = { render, navigate, toast, openModal, closeModal, onRemoteChange, updateSyncChip };
 
   /* ---------- boot ---------- */
@@ -2791,6 +2806,7 @@
       EPM.storage.seed();
       applyTheme();
       render();
+      hideSplash();
       checkDueReminders();
       EPM.sync.start();
     });
