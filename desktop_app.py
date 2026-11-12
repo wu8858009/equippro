@@ -165,6 +165,41 @@ def single_instance():
     return True
 
 
+def centered_geometry(want_w, want_h):
+    """Window size (logical px) that fits the primary screen's work area (the
+    area not covered by the taskbar), and the x/y that centers it there.
+    pywebview only centers when the window is smaller than the screen, so a
+    1320x860 window on a laptop or a 125%/150% scaled display ended up
+    pushed to a corner."""
+    if os.name != 'nt':
+        return want_w, want_h, None, None
+    try:
+        user32 = ctypes.windll.user32
+        try:
+            ctypes.windll.shcore.SetProcessDpiAwareness(2)  # same as pywebview; harmless if already set
+        except Exception:
+            pass
+
+        class RECT(ctypes.Structure):
+            _fields_ = [('left', ctypes.c_long), ('top', ctypes.c_long), ('right', ctypes.c_long), ('bottom', ctypes.c_long)]
+        r = RECT()
+        if not user32.SystemParametersInfoW(0x0030, 0, ctypes.byref(r), 0):  # SPI_GETWORKAREA, physical px
+            raise OSError('SPI_GETWORKAREA failed')
+        try:
+            scale = user32.GetDpiForSystem() / 96.0
+        except Exception:
+            scale = 1.0
+        left, top = r.left / scale, r.top / scale
+        avail_w, avail_h = (r.right - r.left) / scale, (r.bottom - r.top) / scale
+        w = int(min(want_w, avail_w * 0.94))
+        h = int(min(want_h, avail_h * 0.94))
+        x = int(left + (avail_w - w) / 2)
+        y = int(top + (avail_h - h) / 2)
+        return w, h, x, y
+    except Exception:
+        return want_w, want_h, None, None
+
+
 def selftest(win, seconds):
     time.sleep(seconds)
     try:
@@ -173,6 +208,10 @@ def selftest(win, seconds):
     except Exception as e:
         status = 'ERR ' + str(e)
     print('SELFTEST', status, flush=True)
+    try:
+        print('GEOMETRY', win.x, win.y, win.width, win.height, centered_geometry(1320, 860), flush=True)
+    except Exception as e:
+        print('GEOMETRY ERR', e, flush=True)
     win.destroy()
 
 
@@ -185,7 +224,8 @@ def main():
     server.daemon_threads = True
     threading.Thread(target=server.serve_forever, daemon=True).start()
     url = f'http://127.0.0.1:{server.server_address[1]}/index.html?desktop=1&t={TOKEN}'
-    kw = dict(width=1320, height=860, min_size=(380, 560), text_select=True)
+    width, height, x, y = centered_geometry(1320, 860)
+    kw = dict(width=width, height=height, x=x, y=y, min_size=(380, 560), text_select=True)
     if os.environ.get('SG_OFFSCREEN'):
         kw.update(x=-4000, y=-4000)
     window = webview.create_window(APP_NAME, url, **kw)
