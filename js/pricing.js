@@ -2,6 +2,31 @@
 (function () {
   const S = EPM.storage;
 
+  const DEFAULT_TAX_RATE = 5; // 營業稅 5%
+
+  // Tax breakdown from an entered amount. taxMode says whether the amount is
+  // 含稅 ('inclusive') or 未稅 ('exclusive'); results are whole dollars.
+  function computeTax(amount, taxMode, taxRate) {
+    const a = Math.max(0, Math.round(Number(amount) || 0));
+    const rate = Math.max(0, Number(taxRate === undefined || taxRate === '' ? DEFAULT_TAX_RATE : taxRate) || 0);
+    if (taxMode === 'exclusive') {
+      const tax = Math.round(a * rate / 100);
+      return { priceExcl: a, tax, priceIncl: a + tax, taxRate: rate, taxMode: 'exclusive' };
+    }
+    const excl = Math.round(a / (1 + rate / 100));
+    return { priceExcl: excl, tax: a - excl, priceIncl: a, taxRate: rate, taxMode: 'inclusive' };
+  }
+
+  // Breakdown of a stored quote. `price` is always the 含稅 amount (what
+  // comparisons and totals use); quotes saved before tax support count as
+  // 含稅 at the default rate.
+  function taxParts(q) {
+    if (q && typeof q.priceExcl === 'number') {
+      return { priceIncl: q.price, priceExcl: q.priceExcl, tax: q.price - q.priceExcl, taxRate: q.taxRate ?? DEFAULT_TAX_RATE, taxMode: q.taxMode || 'inclusive' };
+    }
+    return computeTax(q ? q.price : 0, 'inclusive', DEFAULT_TAX_RATE);
+  }
+
   function list(equipmentId) {
     const all = S.read(S.KEYS.quotes, []);
     return equipmentId ? all.filter(q => q.equipmentId === equipmentId) : all;
@@ -10,12 +35,16 @@
 
   function addQuote(data) {
     const all = list();
+    const t = computeTax(data.amount !== undefined ? data.amount : data.price, data.taxMode, data.taxRate);
     const q = {
       id: S.uid('qt'),
       equipmentId: data.equipmentId,
       itemName: data.itemName,
       vendor: data.vendor,
-      price: Number(data.price) || 0,
+      price: t.priceIncl,
+      priceExcl: t.priceExcl,
+      taxRate: t.taxRate,
+      taxMode: t.taxMode,
       quoteDate: data.quoteDate,
       validUntil: data.validUntil || '',
       contact: data.contact || '',
@@ -26,7 +55,7 @@
     };
     all.push(q);
     saveAll(all);
-    EPM.auth.logActivity('新增報價', data.itemName, `${data.vendor} $${q.price.toLocaleString()}`);
+    EPM.auth.logActivity('新增報價', data.itemName, `${data.vendor} 含稅 $${q.price.toLocaleString()}（未稅 $${q.priceExcl.toLocaleString()}）`);
     return q;
   }
 
@@ -34,8 +63,15 @@
     const all = list();
     const idx = all.findIndex(q => q.id === id);
     if (idx === -1) return null;
+    patch = { ...patch };
+    if (patch.amount !== undefined) {
+      const t = computeTax(patch.amount, patch.taxMode, patch.taxRate);
+      delete patch.amount;
+      Object.assign(patch, { price: t.priceIncl, priceExcl: t.priceExcl, taxRate: t.taxRate, taxMode: t.taxMode });
+    }
     all[idx] = { ...all[idx], ...patch };
     saveAll(all);
+    if (patch.price !== undefined) EPM.auth.logActivity('編輯報價', all[idx].itemName, `${all[idx].vendor} 含稅 $${all[idx].price.toLocaleString()}`);
     return all[idx];
   }
 
@@ -80,6 +116,7 @@
   }
 
   window.EPM.pricing = {
+    DEFAULT_TAX_RATE, computeTax, taxParts,
     list, addQuote, updateQuote, selectVendor, removeQuote,
     removeQuotesByEquipment, groupedByItem
   };

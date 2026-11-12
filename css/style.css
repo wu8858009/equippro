@@ -517,6 +517,18 @@ textarea { resize: vertical; font-family: inherit; }
 .qr-label-large .qr-label-sub, .qr-label-large .qr-label-org { font-size: 3mm; }
 #label-print-root { display: none; }
 
+/* ---------- quote tax ---------- */
+.price-stack { display: flex; flex-direction: column; }
+.table td .price-stack { align-items: inherit; }
+@media (max-width: 900px) { .table td .price-stack { align-items: flex-end; } }
+.tax-row { display: grid; grid-template-columns: 2fr 1fr 1fr; gap: 14px; }
+.tax-preview {
+  display: flex; flex-wrap: wrap; gap: 6px 18px; padding: 10px 12px; border-radius: var(--radius-sm);
+  background: var(--brand-wash); font-size: 13px; color: var(--text-secondary);
+}
+.tax-preview strong { color: var(--text-primary); font-variant-numeric: tabular-nums; }
+@media (max-width: 600px) { .tax-row { grid-template-columns: 1fr 1fr; } .tax-row .field:first-child { grid-column: 1 / -1; } }
+
 /* ---------- settings ---------- */
 .settings-intro { margin: 0; font-size: 13px; line-height: 1.6; }
 .settings-actions { display: flex; flex-wrap: wrap; gap: 8px; }

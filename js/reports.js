@@ -517,10 +517,13 @@
     const colors = group.quotes.map((q, i) => CATEGORICAL_ORDER[i % CATEGORICAL_ORDER.length]);
     charts[canvasId] = new Chart(ctx, {
       type: 'bar',
-      data: { labels, datasets: [{ label: '報價', data, backgroundColor: colors, borderRadius: 4, maxBarThickness: 40 }] },
+      data: { labels, datasets: [{ label: '含稅報價', data, backgroundColor: colors, borderRadius: 4, maxBarThickness: 40 }] },
       options: {
         indexAxis: 'y',
-        plugins: { legend: { display: false }, tooltip: { callbacks: { label: (c) => `NT$ ${c.formattedValue}` } } },
+        plugins: { legend: { display: false }, tooltip: { callbacks: {
+          label: (c) => `含稅 NT$ ${c.formattedValue}`,
+          afterLabel: (c) => `未稅 NT$ ${EPM.pricing.taxParts(group.quotes[c.dataIndex]).priceExcl.toLocaleString()}`
+        } } },
         scales: {
           x: { beginAtZero: true, ticks: { color: ink(), callback: (v) => 'NT$' + Number(v).toLocaleString() }, grid: { color: grid() } },
           y: { ticks: { color: ink() }, grid: { display: false } }
@@ -584,7 +587,9 @@
     });
     const csv = toCSV(rows, [
       { label: '項目', value: 'itemName' }, { label: '設備', value: 'equipmentName' }, { label: '廠商', value: 'vendor' },
-      { label: '報價', value: 'price' }, { label: '報價日期', value: 'quoteDate' }, { label: '有效期限', value: 'validUntil' },
+      { label: '未稅價', value: (r) => EPM.pricing.taxParts(r).priceExcl }, { label: '稅額', value: (r) => EPM.pricing.taxParts(r).tax },
+      { label: '含稅價', value: 'price' }, { label: '稅率(%)', value: (r) => EPM.pricing.taxParts(r).taxRate },
+      { label: '報價日期', value: 'quoteDate' }, { label: '有效期限', value: 'validUntil' },
       { label: '聯絡方式', value: 'contact' }, { label: '已選定', value: (r) => r.selected ? '是' : '否' }, { label: '備註', value: 'notes' }
     ]);
     downloadCSV('報價紀錄_' + todayStr() + '.csv', csv);

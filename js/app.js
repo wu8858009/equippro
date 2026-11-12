@@ -11,6 +11,12 @@
   }
   function fmtMoney(n) { return 'NT$ ' + Number(n || 0).toLocaleString(); }
   function fmtDate(d) { return d ? d : '—'; }
+  // 未稅 / 含稅 cells for a quote row; the lowest 含稅 offer is highlighted.
+  function quotePriceCells(q, lowest) {
+    const t = EPM.pricing.taxParts(q);
+    return `<td class="mono" data-label="未稅價">${fmtMoney(t.priceExcl)}</td>
+      <td class="mono" data-label="含稅價"><div class="price-stack"><span class="${lowest ? 'text-good' : ''}">${fmtMoney(t.priceIncl)}</span><span class="muted cell-sub">稅 ${t.taxRate}%：${fmtMoney(t.tax)}${t.taxMode === 'exclusive' ? '・未稅報價' : ''}</span></div></td>`;
+  }
   const STATUS_LABEL = EPM.reports.STATUS_LABEL;
   function statusBadge(status) {
     const cls = { active: 'badge-good', pending: 'badge-warn', retired: 'badge-muted', damaged: 'badge-crit' }[status] || 'badge-muted';
@@ -1152,19 +1158,19 @@
         <div class="card-header"><h3>廠商報價</h3><button class="btn btn-sm btn-primary" id="add-quote-btn">＋ 新增報價</button></div>
         <div class="table-wrap">
           <table class="table">
-            <thead><tr><th>項目</th><th>廠商</th><th>報價</th><th>報價日期</th><th>有效期限</th><th>照片</th><th>狀態</th>${isAdmin ? '<th></th>' : ''}</tr></thead>
+            <thead><tr><th>項目</th><th>廠商</th><th>未稅價</th><th>含稅價</th><th>報價日期</th><th>有效期限</th><th>照片</th><th>狀態</th><th></th></tr></thead>
             <tbody>
               ${quotes.length ? quotes.map((q, i) => `
                 <tr class="${q.selected ? 'row-selected' : ''}">
                   <td data-label="項目">${esc(q.itemName)}</td>
                   <td data-label="廠商">${esc(q.vendor)}</td>
-                  <td class="mono ${i === 0 ? 'text-good' : ''}" data-label="報價">${fmtMoney(q.price)}</td>
+                  ${quotePriceCells(q, i === 0)}
                   <td class="mono" data-label="報價日期">${fmtDate(q.quoteDate)}</td>
                   <td class="mono" data-label="有效期限">${fmtDate(q.validUntil)}</td>
                   <td data-label="照片">${EPM.photos.thumbRowHtml(q.photos, q.id)}</td>
                   <td data-label="狀態">${q.selected ? '<span class="badge badge-good">已選定</span>' : (isAdmin ? `<button class="btn btn-sm btn-ghost" data-select-quote="${q.id}">選定</button>` : '—')}</td>
-                  ${isAdmin ? `<td class="row-actions"><button class="btn btn-sm btn-ghost btn-danger" data-del-quote="${q.id}">刪除</button></td>` : ''}
-                </tr>`).join('') : `<tr><td colspan="${isAdmin ? 8 : 7}" class="empty-cell">尚無報價紀錄</td></tr>`}
+                  <td class="row-actions"><button class="btn btn-sm btn-ghost" data-edit-quote="${q.id}">編輯</button>${isAdmin ? `<button class="btn btn-sm btn-ghost btn-danger" data-del-quote="${q.id}">刪除</button>` : ''}</td>
+                </tr>`).join('') : `<tr><td colspan="9" class="empty-cell">尚無報價紀錄</td></tr>`}
             </tbody>
           </table>
         </div>
@@ -1185,6 +1191,10 @@
     }));
     root.querySelectorAll('[data-select-quote]').forEach(b => b.addEventListener('click', () => {
       EPM.pricing.selectVendor(b.dataset.selectQuote); toast('已選定廠商'); renderEquipmentDetail(id);
+    }));
+    root.querySelectorAll('[data-edit-quote]').forEach(b => b.addEventListener('click', () => {
+      const q = quotes.find(x => x.id === b.dataset.editQuote);
+      if (q) openQuoteForm(eq, q.itemName, q);
     }));
     root.querySelectorAll('[data-view-eq-photo]').forEach(el => el.addEventListener('click', () => {
       EPM.photos.openLightbox(eq.photos, Number(el.dataset.viewEqPhoto));
@@ -1237,39 +1247,63 @@
     });
   }
 
-  function openQuoteForm(eq, defaultItemName) {
+  function openQuoteForm(eq, defaultItemName, existing) {
+    const isEdit = !!existing;
+    const t0 = isEdit ? EPM.pricing.taxParts(existing) : { taxMode: 'inclusive', taxRate: EPM.pricing.DEFAULT_TAX_RATE };
+    const amount0 = isEdit ? (t0.taxMode === 'exclusive' ? t0.priceExcl : t0.priceIncl) : '';
     const html = `
-      <div class="modal-header"><h3>新增報價 — ${esc(eq.name)}</h3><button class="icon-btn" data-close-modal>✕</button></div>
+      <div class="modal-header"><h3>${isEdit ? '編輯報價' : '新增報價'} — ${esc(eq.name)}</h3><button class="icon-btn" data-close-modal>✕</button></div>
       <form id="quote-form" class="form modal-body">
-        <label class="field"><span>報價項目 *</span><input type="text" name="itemName" required value="${esc(defaultItemName || eq.name + ' 汰換')}" /></label>
-        <div class="form-row">
-          <label class="field"><span>廠商 *</span><input type="text" name="vendor" required /></label>
-          <label class="field"><span>報價金額 *</span><input type="number" min="0" name="price" required /></label>
+        <label class="field"><span>報價項目 *</span><input type="text" name="itemName" required value="${esc(isEdit ? existing.itemName : (defaultItemName || eq.name + ' 汰換'))}" /></label>
+        <label class="field"><span>廠商 *</span><input type="text" name="vendor" required value="${esc(isEdit ? existing.vendor : '')}" /></label>
+        <div class="tax-row">
+          <label class="field"><span>報價金額 *</span><input type="number" min="0" step="1" name="amount" required value="${amount0}" /></label>
+          <label class="field"><span>金額為</span>
+            <select name="taxMode">
+              <option value="inclusive" ${t0.taxMode !== 'exclusive' ? 'selected' : ''}>含稅</option>
+              <option value="exclusive" ${t0.taxMode === 'exclusive' ? 'selected' : ''}>未稅</option>
+            </select>
+          </label>
+          <label class="field"><span>稅率 (%)</span><input type="number" min="0" max="100" step="0.1" name="taxRate" value="${t0.taxRate}" /></label>
         </div>
+        <div class="tax-preview" id="tax-preview"></div>
         <div class="form-row">
-          <label class="field"><span>報價日期</span><input type="date" name="quoteDate" value="${new Date().toISOString().slice(0, 10)}" /></label>
-          <label class="field"><span>有效期限</span><input type="date" name="validUntil" /></label>
+          <label class="field"><span>報價日期</span><input type="date" name="quoteDate" value="${esc(isEdit ? existing.quoteDate : new Date().toISOString().slice(0, 10))}" /></label>
+          <label class="field"><span>有效期限</span><input type="date" name="validUntil" value="${esc(isEdit ? existing.validUntil : '')}" /></label>
         </div>
-        <label class="field"><span>聯絡方式</span><input type="text" name="contact" /></label>
-        <label class="field"><span>備註</span><textarea name="notes" rows="2"></textarea></label>
+        <label class="field"><span>聯絡方式</span><input type="text" name="contact" value="${esc(isEdit ? existing.contact : '')}" /></label>
+        <label class="field"><span>備註</span><textarea name="notes" rows="2">${esc(isEdit ? existing.notes : '')}</textarea></label>
         <label class="field"><span>報價單／照片</span><div id="quote-photo-picker"></div></label>
         <div class="modal-footer">
           <button type="button" class="btn btn-ghost" data-close-modal>取消</button>
-          <button type="submit" class="btn btn-primary">新增報價</button>
+          <button type="submit" class="btn btn-primary">${isEdit ? '儲存變更' : '新增報價'}</button>
         </div>
       </form>`;
-    const pendingPhotos = [];
+    const pendingPhotos = isEdit ? (existing.photos || []).slice() : [];
     openModal(html, {
       onMount: (modalEl) => {
         EPM.photos.mountPicker(modalEl.querySelector('#quote-photo-picker'), pendingPhotos);
-        document.getElementById('quote-form').addEventListener('submit', (e) => {
+        const form = document.getElementById('quote-form');
+        const preview = modalEl.querySelector('#tax-preview');
+        const showTax = () => {
+          if (form.amount.value === '') { preview.innerHTML = '<span class="muted">輸入金額後自動計算未稅價、稅額與含稅價</span>'; return; }
+          const t = EPM.pricing.computeTax(form.amount.value, form.taxMode.value, form.taxRate.value);
+          preview.innerHTML = `<span>未稅 <strong>${fmtMoney(t.priceExcl)}</strong></span><span>稅額 <strong>${fmtMoney(t.tax)}</strong></span><span>含稅 <strong>${fmtMoney(t.priceIncl)}</strong></span>`;
+        };
+        ['input', 'change'].forEach(ev => form.addEventListener(ev, (e) => { if (['amount', 'taxMode', 'taxRate'].includes(e.target.name)) showTax(); }));
+        showTax();
+        form.addEventListener('submit', (e) => {
           e.preventDefault();
           const data = Object.fromEntries(new FormData(e.target).entries());
-          data.equipmentId = eq.id;
           data.photos = pendingPhotos;
-          EPM.pricing.addQuote(data);
+          if (isEdit) {
+            EPM.pricing.updateQuote(existing.id, data);
+          } else {
+            data.equipmentId = eq.id;
+            EPM.pricing.addQuote(data);
+          }
           closeModal();
-          toast('已新增報價');
+          toast(isEdit ? '已儲存報價' : '已新增報價');
           if (parseHash().route === 'pricing') renderPricing(); else renderEquipmentDetail(eq.id);
         });
       }
@@ -1328,7 +1362,7 @@
         <div class="stat-card">
           <div class="stat-label">可節省金額</div>
           <div class="stat-value">${fmtMoney(savings)}</div>
-          <div class="stat-sub">各項目最高與最低報價差額加總</div>
+          <div class="stat-sub">各項目最高與最低含稅報價差額加總</div>
         </div>
       </div>
 
@@ -1360,18 +1394,18 @@
           ${expanded ? `
           <div class="table-wrap">
             <table class="table">
-              <thead><tr><th>廠商</th><th>報價</th><th>報價日期</th><th>有效期限</th><th>聯絡方式</th><th>照片</th><th>狀態</th>${isAdmin ? '<th></th>' : ''}</tr></thead>
+              <thead><tr><th>廠商</th><th>未稅價</th><th>含稅價</th><th>報價日期</th><th>有效期限</th><th>聯絡方式</th><th>照片</th><th>狀態</th><th></th></tr></thead>
               <tbody>
                 ${g.quotes.map((q, i) => `
                   <tr class="${q.selected ? 'row-selected' : ''}">
                     <td data-label="廠商">${esc(q.vendor)}</td>
-                    <td class="mono ${i === 0 ? 'text-good' : ''}" data-label="報價">${fmtMoney(q.price)}</td>
+                    ${quotePriceCells(q, i === 0)}
                     <td class="mono" data-label="報價日期">${fmtDate(q.quoteDate)}</td>
                     <td class="mono" data-label="有效期限">${fmtDate(q.validUntil)}</td>
                     <td data-label="聯絡方式">${esc(q.contact || '—')}</td>
                     <td data-label="照片">${EPM.photos.thumbRowHtml(q.photos, q.id)}</td>
                     <td data-label="狀態">${q.selected ? '<span class="badge badge-good">已選定</span>' : (isAdmin ? `<button class="btn btn-sm btn-ghost" data-select-quote="${q.id}">選定</button>` : '—')}</td>
-                    ${isAdmin ? `<td class="row-actions"><button class="btn btn-sm btn-ghost btn-danger" data-del-quote="${q.id}">刪除</button></td>` : ''}
+                    <td class="row-actions"><button class="btn btn-sm btn-ghost" data-edit-quote="${q.id}">編輯</button>${isAdmin ? `<button class="btn btn-sm btn-ghost btn-danger" data-del-quote="${q.id}">刪除</button>` : ''}</td>
                   </tr>`).join('')}
               </tbody>
             </table>
@@ -1395,6 +1429,12 @@
       if (eq) openQuoteForm(eq, b.dataset.item);
     }));
     root.querySelectorAll('[data-select-quote]').forEach(b => b.addEventListener('click', (e) => { e.stopPropagation(); EPM.pricing.selectVendor(b.dataset.selectQuote); toast('已選定廠商'); renderPricing(); }));
+    root.querySelectorAll('[data-edit-quote]').forEach(b => b.addEventListener('click', (e) => {
+      e.stopPropagation();
+      const q = EPM.pricing.list().find(x => x.id === b.dataset.editQuote);
+      const qe = q && EPM.equipment.get(q.equipmentId);
+      if (qe) openQuoteForm(qe, q.itemName, q);
+    }));
     root.querySelectorAll('[data-open-photos]').forEach(el => el.addEventListener('click', (e) => {
       e.stopPropagation();
       const q = EPM.pricing.list().find(q => q.id === el.dataset.openPhotos);
