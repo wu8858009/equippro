@@ -96,7 +96,7 @@
     const groups = { open: (r) => r.status === '待處理' || r.status === '處理中', done: (r) => r.status === '已完成', cancel: (r) => r.status === '已取消', all: () => true };
     const rows = all.filter(groups[rFilter]).sort((a, b) => (a.urgency === '緊急' ? 0 : 1) - (b.urgency === '緊急' ? 0 : 1) || b.reportedAt - a.reportedAt);
     if (rFilter !== 'open') rows.sort((a, b) => b.reportedAt - a.reportedAt);
-    main.innerHTML = `${UI.pageHead('報修', `<button class="btn primary" id="r-new">＋ 我要報修</button>`, '同事掃設備上的 QR 標籤也可以直接報修')}
+    main.innerHTML = `${UI.pageHead('報修', `<button class="btn" data-scan>📷 掃描設備報修</button><button class="btn primary" id="r-new">＋ 我要報修</button>`, '同事掃設備上的 QR 標籤也可以直接報修')}
       <div class="chips">${[['open', '待處理＋處理中'], ['done', '已完成'], ['cancel', '已取消'], ['all', '全部']].map(([k, l]) => `<button class="chip ${rFilter === k ? 'on' : ''}" data-f="${k}">${l} <i>${all.filter(groups[k]).length}</i></button>`).join('')}</div>
       <section class="card">${rows.length ? `<ul class="list">${rows.map((r) => `<li class="list-row">
         <a class="grow" href="#/repair/${r.id}"><b>${r.urgency === '緊急' ? '🚨 ' : ''}${esc(r.title)}</b>
@@ -328,7 +328,7 @@
       ['📦 耗材', DB.all('parts').filter((p) => has(p.name, p.spec, p.location, p.vendor)).map((p) => ['#/parts', p.name, `庫存 ${Q.stockOf(p.id)} ${p.unit || ''}`])]
     ].filter((g) => g[1].length);
     const total = groups.reduce((t, g) => t + g[1].length, 0);
-    main.innerHTML = `${UI.pageHead('搜尋')}
+    main.innerHTML = `${UI.pageHead('搜尋', '<button class="btn" data-scan>📷 掃描 QR Code</button>')}
       <div class="toolbar card"><input type="search" id="gs-q" placeholder="🔍 搜尋設備、報修、紀錄、報價、廠商、耗材…" value="${esc(q)}"></div>
       ${s ? `<p class="muted small">找到 ${total} 筆</p>` : ''}
       ${groups.map(([t, items]) => `<section class="card"><div class="card-head"><h2>${t} <small class="muted">${items.length}</small></h2></div>

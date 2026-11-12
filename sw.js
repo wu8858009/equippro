@@ -1,7 +1,7 @@
 // 設備管家 service worker: network first, cached copy when offline.
-const CACHE = 'sg-v1.2.2';
-const CORE = ['./', 'index.html', 'css/style.css?v=1.2.2', 'js/vendor/qrcode.js?v=1.2.2', 'js/core.js?v=1.2.2', 'js/ui.js?v=1.2.2',
-  'js/pages-equipment.js?v=1.2.2', 'js/pages-more.js?v=1.2.2', 'js/media.js?v=1.2.2', 'js/pages-ops.js?v=1.2.2', 'js/app.js?v=1.2.2', 'manifest.webmanifest',
+const CACHE = 'sg-v1.3.0';
+const CORE = ['./', 'index.html', 'css/style.css?v=1.3.0', 'js/vendor/qrcode.js?v=1.3.0', 'js/core.js?v=1.3.0', 'js/ui.js?v=1.3.0',
+  'js/pages-equipment.js?v=1.3.0', 'js/pages-more.js?v=1.3.0', 'js/media.js?v=1.3.0', 'js/pages-ops.js?v=1.3.0', 'js/scanner.js?v=1.3.0', 'js/app.js?v=1.3.0', 'manifest.webmanifest',
   'icons/icon-192.png', 'icons/icon-512.png', 'icons/icon-180.png'];
 self.addEventListener('install', (e) => {
   e.waitUntil(caches.open(CACHE).then((c) => c.addAll(CORE)).then(() => self.skipWaiting()));

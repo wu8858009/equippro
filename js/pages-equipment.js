@@ -298,7 +298,7 @@
 
     const kpi = (icon, label, val, href, cls = '') => `<a class="kpi ${cls}" href="${href}"><span class="kpi-icon">${icon}</span><span class="kpi-val">${val}</span><span class="kpi-lab">${label}</span></a>`;
     main.innerHTML = `
-      ${UI.pageHead('總覽', `<button class="btn" id="d-repair">🛠️ 我要報修</button>${canEdit() ? `<button class="btn primary" id="d-add">＋ 新增設備</button>` : ''}`, `${esc(DB.settings().orgName)}${Q.curStore() ? '・' + esc(Q.curStore()) : ''}・${U.today()}`)}
+      ${UI.pageHead('總覽', `<button class="btn" data-scan>📷 掃描 QR</button><button class="btn" id="d-repair">🛠️ 我要報修</button>${canEdit() ? `<button class="btn primary" id="d-add">＋ 新增設備</button>` : ''}`, `${esc(DB.settings().orgName)}${Q.curStore() ? '・' + esc(Q.curStore()) : ''}・${U.today()}`)}
       <div class="kpis">
         ${kpi('🧰', '待處理報修', repairs.length, '#/repairs', repairs.some((r) => r.urgency === '緊急') ? 'danger' : repairs.length ? 'warn' : '')}
         ${kpi('🗄️', '使用中設備', active.filter((e) => e.status === '使用中').length, '#/equipment')}

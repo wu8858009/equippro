@@ -205,13 +205,13 @@
         <aside class="side">
           <div class="brand"><img src="icons/icon-192.png" alt=""><div><b>設備管家</b><small id="org-name">${esc(DB.settings().orgName)}</small></div></div>
           ${storeSel('store-side')}
-          <form class="side-search" id="side-search"><input type="search" placeholder="🔍 搜尋（Ctrl+K）" aria-label="全站搜尋"></form>
+          <form class="side-search" id="side-search"><input type="search" placeholder="🔍 搜尋（Ctrl+K）" aria-label="全站搜尋"><button type="button" class="icon-btn" data-scan title="掃描 QR Code">📷</button></form>
           <nav class="nav">${items.map(link).join('')}</nav>
           <div class="side-foot"><div class="me">👤 ${esc(me.name)} <small>${esc(Auth.ROLES[me.role])}</small></div><div id="sync-pill"></div></div>
         </aside>
         <header class="topbar">
           <div class="brand"><img src="icons/icon-192.png" alt=""><b>設備管家</b></div>
-          <div class="top-right">${storeSel('store-top')}<a href="#/search" class="icon-btn top-search" aria-label="搜尋">🔍</a><span id="sync-pill-m"></span></div>
+          <div class="top-right">${storeSel('store-top')}<button class="icon-btn top-search" data-scan aria-label="掃描 QR Code">📷</button><a href="#/search" class="icon-btn top-search" aria-label="搜尋">🔍</a><span id="sync-pill-m"></span></div>
         </header>
         <main id="main"></main>
         <nav class="nav bottom-nav">
@@ -222,7 +222,7 @@
         e.preventDefault();
         const m = UI.modal({
           title: '更多功能',
-          body: `<div class="more-grid"><a href="#/search" class="more-item"><span>🔍</span>搜尋</a>${items.filter((n) => !MOBILE_NAV.includes(n[0])).map(([h, i, l]) => `<a href="${h}" class="more-item"><span>${i}</span>${l}</a>`).join('')}</div>
+          body: `<div class="more-grid"><a href="#" data-scan class="more-item"><span>📷</span>掃描 QR</a><a href="#/search" class="more-item"><span>🔍</span>搜尋</a>${items.filter((n) => !MOBILE_NAV.includes(n[0])).map(([h, i, l]) => `<a href="${h}" class="more-item"><span>${i}</span>${l}</a>`).join('')}</div>
             <p class="small muted center">👤 ${esc(me.name)}（${esc(Auth.ROLES[me.role])}）</p>`
         });
         UI.$$('.more-item', m.body).forEach((a) => a.addEventListener('click', () => m.close()));
@@ -269,6 +269,14 @@
       if (window.scrollX) window.scrollTo(0, window.scrollY);
     }, 300));
   }
+
+  // Any element with [data-scan] opens the QR scanner.
+  document.addEventListener('click', (e) => {
+    const b = e.target.closest && e.target.closest('[data-scan]');
+    if (!b || !Auth.current) return;
+    e.preventDefault();
+    SG.scanner.open();
+  });
 
   document.addEventListener('keydown', (e) => {
     if (!Auth.current) return;

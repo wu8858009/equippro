@@ -492,3 +492,21 @@ body.modal-open { overflow: hidden; }
   body.kb-open .bottom-nav { display: none; }
   body.kb-open main#main { padding-bottom: 24px; }
 }
+
+/* ---------------- QR scanner */
+.side-search { display: flex; gap: 4px; align-items: center; }
+.side-search input { flex: 1; min-width: 0; }
+.scan-wrap { position: relative; background: #000; border-radius: 14px; overflow: hidden; aspect-ratio: 4 / 3; max-height: 62vh; margin: 0 auto; display: grid; place-items: center; }
+.scan-video { width: 100%; height: 100%; object-fit: cover; display: block; }
+.scan-frame { position: absolute; width: min(62%, 280px); aspect-ratio: 1; }
+.scan-frame i { position: absolute; width: 28px; height: 28px; border: 4px solid #2dd4bf; }
+.scan-frame i:nth-child(1) { top: 0; left: 0; border-right: 0; border-bottom: 0; border-radius: 10px 0 0 0; }
+.scan-frame i:nth-child(2) { top: 0; right: 0; border-left: 0; border-bottom: 0; border-radius: 0 10px 0 0; }
+.scan-frame i:nth-child(3) { bottom: 0; left: 0; border-right: 0; border-top: 0; border-radius: 0 0 0 10px; }
+.scan-frame i:nth-child(4) { bottom: 0; right: 0; border-left: 0; border-top: 0; border-radius: 0 0 10px 0; }
+.scan-line { position: absolute; left: 8%; right: 8%; height: 2px; background: #2dd4bf; box-shadow: 0 0 10px #2dd4bf; animation: scanline 2s ease-in-out infinite; }
+@keyframes scanline { 0%, 100% { top: 8%; } 50% { top: 90%; } }
+.scan-msg { position: absolute; left: 12px; right: 12px; bottom: 12px; background: rgba(0, 0, 0, .65); color: #fff; border-radius: 10px; padding: 8px 12px; font-size: 14px; text-align: center; }
+.scan-btns { justify-content: center; }
+.scan-text { background: var(--hover); border-radius: 10px; padding: 10px 12px; word-break: break-all; font-family: Consolas, monospace; font-size: 14px; }
+@media (max-width: 600px) { .scan-modal .modal { max-height: 96vh; } .scan-wrap { aspect-ratio: 3 / 4; max-height: 58vh; } }
