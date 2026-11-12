@@ -253,6 +253,23 @@
     }
   });
 
+  // Phones: hide the bottom nav while the on-screen keyboard is up (otherwise
+  // it floats in the middle of the screen), and snap the page back if the
+  // browser left it zoomed/scrolled sideways after typing.
+  if (window.visualViewport) {
+    const vv = window.visualViewport;
+    const onVV = () => {
+      const kb = window.innerHeight - vv.height > 150 && /INPUT|TEXTAREA|SELECT/.test((document.activeElement || {}).tagName || '');
+      document.body.classList.toggle('kb-open', kb);
+    };
+    vv.addEventListener('resize', onVV);
+    document.addEventListener('focusin', () => setTimeout(onVV, 300));
+    document.addEventListener('focusout', () => setTimeout(() => {
+      onVV();
+      if (window.scrollX) window.scrollTo(0, window.scrollY);
+    }, 300));
+  }
+
   document.addEventListener('keydown', (e) => {
     if (!Auth.current) return;
     const typing = /INPUT|TEXTAREA|SELECT/.test((document.activeElement || {}).tagName || '');

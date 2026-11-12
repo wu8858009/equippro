@@ -168,7 +168,7 @@ main#main { margin-left: var(--side-w); padding: 26px clamp(16px, 3vw, 40px) 60p
 .toolbar select { flex: 0 1 170px; width: auto; }
 @media (max-width: 600px) {
   .toolbar input[type=search] { flex-basis: 100%; }
-  .toolbar select { flex: 1 1 0; min-width: 0; padding-left: 8px; padding-right: 4px; font-size: 14px; }
+  .toolbar select { flex: 1 1 calc(50% - 8px); min-width: 0; padding-left: 8px; padding-right: 4px; }
   .page-actions .btn { flex: 1 1 auto; }
   .page-actions { width: 100%; }
 }
@@ -475,3 +475,20 @@ a.kpi:hover { text-decoration: none; border-color: var(--accent-2); }
 .area-log li::before { content: ''; position: absolute; left: -21px; top: 9px; width: 10px; height: 10px; border-radius: 50%; background: var(--line); border: 2px solid var(--card); }
 .area-log li.cur::before { background: var(--accent); }
 .area-log small { display: block; color: var(--muted); font-size: 12px; }
+
+/* ---------------- phone: keep the bottom nav pinned */
+html, body { overflow-x: clip; max-width: 100%; }
+body.modal-open { overflow: hidden; }
+@media (max-width: 899px) {
+  /* iOS zooms into any field under 16px, which shifts fixed bars; never let it. */
+  input, select, textarea, .store-sel, .side-search input, .g-add select, .toolbar select { font-size: 16px !important; }
+  .bottom-nav {
+    position: fixed !important; left: 0 !important; right: 0 !important; bottom: 0 !important; top: auto !important;
+    width: 100%; transform: translate3d(0, 0, 0); -webkit-transform: translate3d(0, 0, 0); will-change: transform;
+    backface-visibility: hidden; z-index: 50;
+  }
+  .topbar { z-index: 50; }
+  /* while the on-screen keyboard is open the nav would float above it */
+  body.kb-open .bottom-nav { display: none; }
+  body.kb-open main#main { padding-bottom: 24px; }
+}

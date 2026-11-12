@@ -39,6 +39,7 @@
         wrap.classList.add('out');
         setTimeout(() => wrap.remove(), 160);
         modalStack = modalStack.filter((m) => m !== api);
+        if (!modalStack.length) document.body.classList.remove('modal-open');
         if (onClose) onClose();
       }
     };
@@ -62,6 +63,7 @@
     wrap.addEventListener('click', (e) => { if (e.target === wrap && wrap._downOutside) api.close(); wrap._downOutside = false; });
     document.body.appendChild(wrap);
     modalStack.push(api);
+    document.body.classList.add('modal-open'); // stop the page behind from scrolling
     const first = UI.$('input:not([type=hidden]):not([readonly]),select,textarea', bodyEl);
     if (first && window.matchMedia('(pointer:fine)').matches) setTimeout(() => first.focus(), 50);
     return api;
