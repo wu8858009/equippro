@@ -72,6 +72,32 @@
     a.click();
     setTimeout(() => { URL.revokeObjectURL(a.href); a.remove(); }, 1000);
   };
+  // Photo → JPEG data URL, longest side ≤ maxSide, shrunk until ≤ maxChars.
+  U.compressImage = (file, maxSide = 1400, maxChars = 260000) => new Promise((resolve, reject) => {
+    if (!file || !/^image\//.test(file.type)) return reject(new Error('請選擇圖片檔'));
+    const url = URL.createObjectURL(file);
+    const img = new Image();
+    img.onload = () => {
+      URL.revokeObjectURL(url);
+      let side = maxSide, q = 0.8, out = '';
+      for (let i = 0; i < 8; i++) {
+        const scale = Math.min(1, side / Math.max(img.naturalWidth, img.naturalHeight));
+        const c = document.createElement('canvas');
+        c.width = Math.max(1, Math.round(img.naturalWidth * scale));
+        c.height = Math.max(1, Math.round(img.naturalHeight * scale));
+        const g = c.getContext('2d');
+        g.fillStyle = '#fff';
+        g.fillRect(0, 0, c.width, c.height);
+        g.drawImage(img, 0, 0, c.width, c.height);
+        out = c.toDataURL('image/jpeg', q);
+        if (out.length <= maxChars) break;
+        if (q > 0.55) q -= 0.1; else side = Math.round(side * 0.8);
+      }
+      resolve(out);
+    };
+    img.onerror = () => { URL.revokeObjectURL(url); reject(new Error('無法讀取這張圖片')); };
+    img.src = url;
+  });
   U.parseCsv = (text) => {
     text = text.replace(/^﻿/, '');
     const rows = [];
@@ -142,8 +168,44 @@
   };
 
   // ------------------------------------------------------------- database
-  const COLLECTIONS = ['users', 'equipment', 'replacements', 'quotes', 'plans', 'logs', 'vendors', 'activity', 'settings'];
+  // `cards` = business-card photos, kept apart from vendors so editing a
+  // vendor's phone number does not re-upload its pictures.
+  const COLLECTIONS = ['users', 'equipment', 'replacements', 'quotes', 'plans', 'logs', 'vendors', 'cards', 'activity', 'settings'];
   const DB_KEY = 'sg_db';
+
+  // The web version keeps the database in IndexedDB (photos would overflow
+  // localStorage's ~5 MB); localStorage is only the fallback/old location.
+  const IDB = {
+    db: null,
+    open() {
+      if (this.db) return Promise.resolve(this.db);
+      return new Promise((resolve, reject) => {
+        if (!window.indexedDB) return reject(new Error('no indexedDB'));
+        const req = indexedDB.open('shebei-guanjia', 1);
+        req.onupgradeneeded = () => req.result.createObjectStore('kv');
+        req.onsuccess = () => { this.db = req.result; resolve(this.db); };
+        req.onerror = () => reject(req.error);
+      });
+    },
+    async get(k) {
+      const db = await this.open();
+      return new Promise((resolve, reject) => {
+        const r = db.transaction('kv').objectStore('kv').get(k);
+        r.onsuccess = () => resolve(r.result == null ? null : r.result);
+        r.onerror = () => reject(r.error);
+      });
+    },
+    async set(k, v) {
+      const db = await this.open();
+      return new Promise((resolve, reject) => {
+        const tx = db.transaction('kv', 'readwrite');
+        tx.objectStore('kv').put(v, k);
+        tx.oncomplete = () => resolve();
+        tx.onerror = () => reject(tx.error);
+        tx.onabort = () => reject(tx.error);
+      });
+    }
+  };
   const ACTIVITY_KEEP = 2000;
   const listeners = new Set();
 
@@ -157,10 +219,14 @@
     COLLECTIONS,
     data: emptyDb(),
     lastStamp: 0,
-    load(raw) {
+    async load(raw) {
       let d = null;
       try { d = typeof raw === 'string' ? JSON.parse(raw) : raw; } catch (e) { d = null; }
       if (!d || typeof d !== 'object') d = null;
+      if (!d && !SG.desktop) {
+        try { const s = await IDB.get(DB_KEY); d = s ? JSON.parse(s) : null; this.useIdb = true; }
+        catch (e) { this.useIdb = false; }
+      }
       if (!d) {
         try { d = JSON.parse(localStorage.getItem(DB_KEY) || 'null'); } catch (e) { d = null; }
       }
@@ -177,11 +243,13 @@
     persist() { if (SG.desktop) DB.saveNow(); else DB._persistSoon(); },
     saveNow() {
       const s = DB.serialize();
-      if (SG.desktop && SG.desktop.save) SG.desktop.save(s);
-      else {
-        try { localStorage.setItem(DB_KEY, s); }
-        catch (e) { SG.ui && SG.ui.toast('儲存空間已滿，請到「設定」匯出備份後清理舊紀錄', 'error'); }
-      }
+      if (SG.desktop && SG.desktop.save) return SG.desktop.save(s);
+      const full = () => SG.ui && SG.ui.toast('儲存空間已滿，請到「設定」匯出備份後清理舊紀錄', 'error');
+      const toLocal = () => { try { localStorage.setItem(DB_KEY, s); } catch (e) { full(); } };
+      if (!this.useIdb) return toLocal();
+      IDB.set(DB_KEY, s).then(() => {
+        if (!DB._movedOut) { DB._movedOut = true; try { localStorage.removeItem(DB_KEY); } catch (e) { /* ignore */ } }
+      }).catch(() => { DB.useIdb = false; toLocal(); });
     },
     stamp() {
       let t = Date.now();
@@ -400,17 +468,21 @@
       try {
         let pushedAll = false, guard = 0, pulled = 0;
         while (!pushedAll && guard++ < 50) {
-          const keys = Object.keys(DB.data._dirty).slice(0, 300);
+          // Batches of up to 300 records or ~1.5 MB (photos are big).
           const sent = {};
-          const changes = keys.map((k) => {
+          const changes = [];
+          let bytes = 0;
+          for (const k of Object.keys(DB.data._dirty)) {
+            if (changes.length >= 300 || bytes > 1500000) break;
             const i = k.indexOf('/');
             const col = k.slice(0, i), id = k.slice(i + 1);
             const rec = DB.data[col] && DB.data[col][id];
-            if (!rec) return null;
+            if (!rec) { delete DB.data._dirty[k]; continue; }
+            const j = JSON.stringify(rec);
             sent[k] = rec.updatedAt;
-            return { c: col, id, u: rec.updatedAt || 0, d: rec.deleted ? 1 : 0, j: JSON.stringify(rec) };
-          }).filter(Boolean);
-          keys.forEach((k) => { if (!(k in sent)) delete DB.data._dirty[k]; });
+            bytes += j.length;
+            changes.push({ c: col, id, u: rec.updatedAt || 0, d: rec.deleted ? 1 : 0, j });
+          }
           const res = await this.call({ action: 'sync', key: c.key, since: c.rev || 0, changes });
           let touched = new Set();
           (res.rows || []).forEach((row) => {

@@ -13,7 +13,8 @@ var SHEET = 'records';
 var FIXED = 5;
 var CHUNK = 45000;
 var PAGE = 1500;
-var COLLECTIONS = ['users', 'equipment', 'replacements', 'quotes', 'plans', 'logs', 'vendors', 'activity', 'settings'];
+var COLLECTIONS = ['users', 'equipment', 'replacements', 'quotes', 'plans', 'logs', 'vendors', 'cards', 'activity', 'settings'];
+var PAGE_CHARS = 3000000; // keep each response a few MB at most (business-card photos)
 var ACTIVITY_MAX = 3000;
 var ACTIVITY_KEEP = 2000;
 
@@ -130,10 +131,14 @@ function sync(req) {
   if (newer.length) {
     var width = sh.getLastColumn();
     var data = sh.getRange(2, 1, fixed.length, width).getValues();
-    newer.forEach(function (i) {
-      var r = data[i];
-      rows.push({ c: r[0], id: String(r[1]), u: Number(r[2]), d: Number(r[3]), j: r.slice(FIXED).join('').replace(/^~/, '') });
-    });
+    var chars = 0;
+    for (var k = 0; k < newer.length; k++) {
+      var r = data[newer[k]];
+      var j = r.slice(FIXED).join('').replace(/^~/, '');
+      if (rows.length && chars + j.length > PAGE_CHARS) { newer = newer.slice(0, k); more = true; break; }
+      chars += j.length;
+      rows.push({ c: r[0], id: String(r[1]), u: Number(r[2]), d: Number(r[3]), j: j });
+    }
   }
   var lastRev = more ? Number(fixed[newer[newer.length - 1]][4]) : rev;
   return { ok: true, rev: lastRev, more: more, accepted: accepted, rows: rows };

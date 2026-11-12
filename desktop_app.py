@@ -9,6 +9,7 @@ Env vars for testing:
   SG_OFFSCREEN  1 = place the window off screen
   SG_SELFTEST   seconds; quit after that many seconds and print a status line
 """
+import base64
 import ctypes
 import datetime
 import json
@@ -133,14 +134,19 @@ class Handler(SimpleHTTPRequestHandler):
                 name = os.path.basename((q.get('name') or ['export.csv'])[0]) or 'export.csv'
                 text = self._body()
                 ext = os.path.splitext(name)[1].lower()
-                types = ('CSV 檔 (*.csv)', '所有檔案 (*.*)') if ext == '.csv' else ('JSON 檔 (*.json)', '所有檔案 (*.*)')
+                types = {'.csv': ('CSV 檔 (*.csv)', '所有檔案 (*.*)'), '.jpg': ('JPEG 圖片 (*.jpg)', '所有檔案 (*.*)')}.get(
+                    ext, ('JSON 檔 (*.json)', '所有檔案 (*.*)'))
                 res = window.create_file_dialog(webview.FileDialog.SAVE, directory=os.path.join(os.path.expanduser('~'), 'Documents'),
                                                 save_filename=name, file_types=types)
                 if not res:
                     return self._json({'ok': False, 'cancelled': True})
                 target = res if isinstance(res, str) else res[0]
-                with open(target, 'w', encoding='utf-8', newline='') as f:
-                    f.write(text)
+                if text.startswith('data:') and ';base64,' in text[:80]:  # photos arrive as data URLs
+                    with open(target, 'wb') as f:
+                        f.write(base64.b64decode(text.split(',', 1)[1]))
+                else:
+                    with open(target, 'w', encoding='utf-8', newline='') as f:
+                        f.write(text)
                 return self._json({'ok': True, 'path': target})
         except Exception as e:  # report instead of dropping the connection
             return self._json({'ok': False, 'error': str(e)}, 500)

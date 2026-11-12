@@ -235,7 +235,7 @@
   async function boot() {
     try {
       const desktopDb = await initDesktop();
-      DB.load(desktopDb);
+      await DB.load(desktopDb);
       if (!SG.desktop && 'serviceWorker' in navigator && location.protocol === 'https:') {
         navigator.serviceWorker.register('sw.js').catch(() => {});
       }

@@ -130,6 +130,63 @@
   });
 
   // ====================================================== vendors
+  // Business cards: front/back photos stored in the `cards` collection.
+  const SIDES = [['front', '正面'], ['back', '反面']];
+  const cardId = (vid, side) => vid + '_' + side;
+  const cardOf = (vid, side) => { const c = DB.get('cards', cardId(vid, side)); return c ? c.data : null; };
+  function saveCard(vid, side, data) {
+    if (data) DB.put('cards', { id: cardId(vid, side), vendorId: vid, side, data });
+    else if (DB.get('cards', cardId(vid, side))) DB.remove('cards', cardId(vid, side));
+  }
+  function cardStrip(v) {
+    const imgs = SIDES.filter(([s]) => cardOf(v.id, s));
+    if (!imgs.length) return canEdit() ? `<button class="card-add" data-cardadd="${v.id}">📇 加入名片</button>` : '';
+    return `<div class="card-strip">${imgs.map(([s, l]) => `<button class="card-thumb" data-card="${v.id}" data-side="${s}" title="名片${l}">
+      <img src="${cardOf(v.id, s)}" alt="名片${l}" loading="lazy"><span>${l}</span></button>`).join('')}</div>`;
+  }
+  function viewCards(v, side) {
+    const imgs = SIDES.filter(([s]) => cardOf(v.id, s));
+    let cur = imgs.findIndex(([s]) => s === side);
+    if (cur < 0) cur = 0;
+    const m = UI.modal({
+      title: v.name + ' 的名片', wide: true,
+      body: `<div class="card-view"><img id="cv-img" alt=""></div>
+        ${imgs.length > 1 ? `<div class="chips center-chips">${imgs.map(([s, l], i) => `<button class="chip" data-i="${i}">${l}</button>`).join('')}</div>` : ''}`,
+      actions: [{ label: '下載圖片', onClick: () => { const [s, l] = imgs[cur]; downloadImage(cardOf(v.id, s), `${v.name}_名片${l}.jpg`); return false; } }, { label: '關閉', kind: 'primary' }]
+    });
+    const show = () => {
+      UI.$('#cv-img', m.body).src = cardOf(v.id, imgs[cur][0]);
+      UI.$$('[data-i]', m.body).forEach((c) => c.classList.toggle('on', +c.dataset.i === cur));
+    };
+    UI.$$('[data-i]', m.body).forEach((c) => (c.onclick = () => { cur = +c.dataset.i; show(); }));
+    show();
+  }
+  function downloadImage(dataUrl, name) {
+    if (SG.desktop) return SG.desktop.saveFile(name, dataUrl);
+    const a = document.createElement('a');
+    a.href = dataUrl; a.download = name;
+    document.body.appendChild(a); a.click(); a.remove();
+  }
+  function pickImage() {
+    return new Promise((resolve) => {
+      const inp = document.createElement('input');
+      inp.type = 'file'; inp.accept = 'image/*';
+      inp.onchange = () => resolve(inp.files[0] || null);
+      inp.click();
+    });
+  }
+  async function quickAddCard(v) {
+    const file = await pickImage();
+    if (!file) return;
+    try {
+      const data = await U.compressImage(file);
+      const side = cardOf(v.id, 'front') ? 'back' : 'front';
+      saveCard(v.id, side, data);
+      SG.log('加入名片', v.name);
+      UI.toast('名片已加入');
+      UI.render();
+    } catch (e) { UI.toast(e.message, 'error'); }
+  }
   function vendorForm(existing) {
     const fields = [
       { name: 'name', label: '廠商名稱', required: true },
@@ -140,14 +197,40 @@
       { name: 'email', label: 'Email', type: 'email' },
       { name: 'taxId', label: '統一編號' },
       { name: 'address', label: '地址' },
-      { name: 'note', label: '備註', type: 'textarea', span: 2 }
+      { name: 'note', label: '備註', type: 'textarea', span: 2 },
+      { type: 'section', label: '名片（可拍照或選擇圖片）' },
+      { type: 'html', html: `<div class="card-slots">${SIDES.map(([s, l]) => `<div class="card-slot" data-slot="${s}"><div class="slot-img"></div>
+        <div class="slot-btns"><button type="button" class="btn sm" data-pick="${s}">📷 ${l}</button><button type="button" class="btn sm danger-ghost" data-clear="${s}">移除</button></div></div>`).join('')}</div>` }
     ];
+    // undefined = unchanged, null = remove, string = new photo
+    const pending = {};
+    const vid = existing && existing.id;
     UI.formModal({
-      title: existing ? '編輯廠商' : '新增廠商', fields, values: existing || {},
+      title: existing && existing.id ? '編輯廠商' : '新增廠商', fields, values: existing || {},
+      afterRender(body) {
+        const paint = () => SIDES.forEach(([s, l]) => {
+          const data = pending[s] !== undefined ? pending[s] : (vid ? cardOf(vid, s) : null);
+          const slot = UI.$(`[data-slot=${s}]`, body);
+          UI.$('.slot-img', slot).innerHTML = data ? `<img src="${data}" alt="名片${l}">` : `<span>尚未加入${l}</span>`;
+          UI.$('[data-clear]', slot).hidden = !data;
+          UI.$('[data-pick]', slot).textContent = (data ? '🔄 更換' : '📷 加入') + l;
+        });
+        UI.$$('[data-pick]', body).forEach((b) => (b.onclick = async () => {
+          const file = await pickImage();
+          if (!file) return;
+          b.disabled = true;
+          try { pending[b.dataset.pick] = await U.compressImage(file); paint(); }
+          catch (e) { UI.toast(e.message, 'error'); }
+          b.disabled = false;
+        }));
+        UI.$$('[data-clear]', body).forEach((b) => (b.onclick = () => { pending[b.dataset.clear] = null; paint(); }));
+        paint();
+      },
       onSave(v) {
         if (DB.all('vendors').some((x) => x.name === v.name && (!existing || x.id !== existing.id))) throw new Error('已經有同名的廠商');
-        DB.put('vendors', Object.assign({}, existing || {}, v));
-        SG.log(existing ? '修改廠商' : '新增廠商', v.name);
+        const rec = DB.put('vendors', Object.assign({}, existing || {}, v));
+        SIDES.forEach(([s]) => { if (pending[s] !== undefined) saveCard(rec.id, s, pending[s]); });
+        SG.log(vid ? '修改廠商' : '新增廠商', v.name);
         UI.toast('已儲存');
         UI.render();
       }
@@ -180,11 +263,19 @@
           ${v.address ? `<div>📍 ${esc(v.address)}</div>` : ''}
           ${v.taxId ? `<div class="muted small">統編 ${esc(v.taxId)}</div>` : ''}
           ${v.note ? `<div class="muted small">${esc(v.note)}</div>` : ''}
+          ${cardStrip(v)}
           <div class="vendor-foot"><span class="small muted">累計支出 ${U.money(spend)}・報價 ${nq} 筆</span>
           ${canEdit() ? `<span><button class="icon-btn" data-ve="${v.id}" title="編輯">✏️</button><button class="icon-btn" data-vd="${v.id}" title="刪除">🗑️</button></span>` : ''}</div></div>`;
       }).join('') : UI.empty(known.length ? '找不到符合的廠商' : '還沒有廠商資料', '📇');
       UI.$$('[data-ve]', main).forEach((b) => (b.onclick = () => vendorForm(DB.get('vendors', b.dataset.ve))));
-      UI.$$('[data-vd]', main).forEach((b) => (b.onclick = async () => { const v = DB.get('vendors', b.dataset.vd); if (await F.remove('vendors', v, v.name)) UI.render(); }));
+      UI.$$('[data-vd]', main).forEach((b) => (b.onclick = async () => {
+        const v = DB.get('vendors', b.dataset.vd);
+        if (!(await F.remove('vendors', v, v.name))) return;
+        SIDES.forEach(([s]) => { if (DB.get('cards', cardId(v.id, s))) DB.remove('cards', cardId(v.id, s)); });
+        UI.render();
+      }));
+      UI.$$('[data-card]', main).forEach((b) => (b.onclick = () => viewCards(DB.get('vendors', b.dataset.card), b.dataset.side)));
+      UI.$$('[data-cardadd]', main).forEach((b) => (b.onclick = () => quickAddCard(DB.get('vendors', b.dataset.cardadd))));
     };
     UI.$('#v-q', main).addEventListener('input', U.debounce((e) => { vendorSearch = e.target.value.trim(); draw(); }, 150));
     const add = UI.$('#v-add', main); if (add) add.onclick = () => vendorForm(null);
