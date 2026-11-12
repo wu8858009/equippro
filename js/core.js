@@ -178,7 +178,7 @@
 
   // The web version keeps the database in IndexedDB (photos would overflow
   // localStorage's ~5 MB); localStorage is only the fallback/old location.
-  const IDB = {
+  const IDB = SG.idb = {
     db: null,
     open() {
       if (this.db) return Promise.resolve(this.db);
@@ -510,6 +510,7 @@
         }
         this.lastAt = Date.now();
         this.setState('idle', '已同步 ' + U.fmtTime(this.lastAt).slice(11));
+        if (SG.notify) SG.notify.check().catch(() => {});
         return { pulled };
       } catch (e) {
         if (e.code === 'BADKEY') {

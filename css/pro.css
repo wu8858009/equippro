@@ -278,3 +278,6 @@ a.kpi:hover { transform: translateY(-2px); box-shadow: var(--shadow-lg); border-
 .sr-only { position: absolute !important; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
 a.me { text-decoration: none !important; border-radius: 12px; padding: 4px; margin: -4px; }
 a.me:hover { background: rgba(255, 255, 255, .06); }
+
+.bg-tips { margin: 12px 0 0; padding-left: 18px; display: grid; gap: 6px; }
+#bg-card .check + .check { margin-top: 8px; }

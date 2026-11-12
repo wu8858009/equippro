@@ -535,6 +535,7 @@
             <div class="field span-2"><label>同步密碼</label><input id="s-key" type="password" placeholder="至少 6 個字" autocomplete="new-password"><small class="hint">雲端第一次連線時，輸入的密碼就會成為同步密碼；其他裝置要輸入同一組密碼。請自行保管。</small></div>
           </div><div class="btn-row"><button class="btn primary" id="s-connect">連線並同步</button></div>` : '<p class="small">尚未連線雲端，請管理員設定。</p>'}`}
       </section>
+      ${SG.notify.settingsHtml()}
       ${admin ? `<section class="card">
         <div class="card-head"><h2>基本設定</h2></div>
         <div class="form-grid">
@@ -563,6 +564,7 @@
     UI.$('#s-theme', main).onchange = (ev) => SG.theme.set(ev.target.value);
     const on = (sel, fn) => { const el = UI.$(sel, main); if (el) el.onclick = fn; };
     on('#s-pw', () => passwordForm(me, true));
+    SG.notify.wireSettings(main);
     on('#s-logout', () => { SG.log('登出', me.name); DB.saveNow(); Auth.logout(); location.hash = ''; location.reload(); });
     const st = UI.$('#s-sync-state', main);
     const showState = () => { if (st) st.innerHTML = SG.syncBadge(); };

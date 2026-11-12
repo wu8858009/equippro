@@ -4,6 +4,12 @@ Serves the web app from a small local HTTP server (threaded, so parallel
 script loads never get dropped) and shows it in a pywebview window. Data is
 kept in %APPDATA%\\ShebeiGuanjia\\data.json with daily backups.
 
+Runs in the background: closing the window hides it to the system tray
+(the page keeps syncing and raises Windows notifications through the tray
+icon); 「結束」 in the tray menu really quits. `--tray` starts hidden (used
+by the start-with-Windows entry). Opening the exe again just shows the
+running copy.
+
 Env vars for testing:
   SG_DATA_DIR   use this folder instead of %APPDATA%\\ShebeiGuanjia
   SG_OFFSCREEN  1 = place the window off screen
@@ -31,10 +37,16 @@ DATA_DIR = os.environ.get('SG_DATA_DIR') or os.path.join(os.environ.get('APPDATA
 DATA_FILE = os.path.join(DATA_DIR, 'data.json')
 PREFS_FILE = os.path.join(DATA_DIR, 'prefs.json')  # sync settings + remembered login
 BACKUP_DIR = os.path.join(DATA_DIR, 'backups')
+INSTANCE_FILE = os.path.join(DATA_DIR, 'instance.json')  # port+token of the running copy
 TOKEN = secrets.token_urlsafe(24)
 ALLOWED = ('index.html', 'css/', 'js/', 'icons/', 'manifest.webmanifest')
+RUN_KEY = r'Software\Microsoft\Windows\CurrentVersion\Run'
+RUN_NAME = 'ShebeiGuanjiaPRO'
 write_lock = threading.Lock()
 window = None
+tray = None
+quitting = False
+hint_shown = False
 
 
 def read_json(path, default=None):
@@ -110,6 +122,8 @@ class Handler(SimpleHTTPRequestHandler):
                 return self._json({'ok': False}, 403)
             if path == '/api/db':
                 return self._json({'ok': True, 'db': read_json(DATA_FILE), 'prefs': read_json(PREFS_FILE, {}), 'path': DATA_DIR})
+            if path == '/api/autostart':
+                return self._json({'ok': True, 'on': get_autostart()})
             return self._json({'ok': False}, 404)
         rel = path.lstrip('/') or 'index.html'
         if not rel.startswith(ALLOWED):
@@ -128,6 +142,19 @@ class Handler(SimpleHTTPRequestHandler):
                 prefs = json.loads(self._body() or '{}')
                 with write_lock:
                     write_atomic(PREFS_FILE, json.dumps(prefs, ensure_ascii=False))
+                return self._json({'ok': True})
+            if path == '/api/notify':
+                body = json.loads(self._body() or '{}')
+                notify(str(body.get('title') or APP_NAME)[:60], str(body.get('body') or '')[:240])
+                return self._json({'ok': True})
+            if path == '/api/autostart':
+                body = json.loads(self._body() or '{}')
+                set_autostart(bool(body.get('on')))
+                return self._json({'ok': True, 'on': get_autostart()})
+            if path == '/api/bg':
+                return self._json({'ok': True})  # tray preference lives in prefs.json (read at close time)
+            if path == '/api/show':
+                show_window()
                 return self._json({'ok': True})
             if path == '/api/savefile':
                 q = urllib.parse.parse_qs(urllib.parse.urlparse(self.path).query)
@@ -155,14 +182,154 @@ class Handler(SimpleHTTPRequestHandler):
 
 
 def single_instance():
-    """Returns False if another copy is already running."""
+    """Returns False if another copy is already running (after asking that
+    copy to show its window, e.g. when it is hidden in the tray)."""
     if os.name != 'nt' or os.environ.get('SG_SELFTEST'):
         return True
     ctypes.windll.kernel32.CreateMutexW(None, False, 'ShebeiGuanjia_SingleInstance')
     if ctypes.windll.kernel32.GetLastError() == 183:  # ERROR_ALREADY_EXISTS
-        ctypes.windll.user32.MessageBoxW(None, '設備管家已經開啟了，請到工作列切換視窗。', APP_NAME, 0x40)
+        info = read_json(INSTANCE_FILE, {}) or {}
+        try:
+            import urllib.request
+            req = urllib.request.Request(f"http://127.0.0.1:{int(info['port'])}/api/show", data=b'{}',
+                                         headers={'X-SG-Token': info['token']}, method='POST')
+            urllib.request.urlopen(req, timeout=3).read()
+        except Exception:
+            ctypes.windll.user32.MessageBoxW(None, '設備管家已經在執行中（右下角系統匣）。', APP_NAME, 0x40)
         return False
     return True
+
+
+# ---------------------------------------------------------------- background / tray
+def exe_command():
+    if getattr(sys, 'frozen', False):
+        return f'"{sys.executable}" --tray'
+    pyw = os.path.join(os.path.dirname(sys.executable), 'pythonw.exe')
+    return f'"{pyw if os.path.exists(pyw) else sys.executable}" "{os.path.abspath(__file__)}" --tray'
+
+
+def get_autostart():
+    if os.name != 'nt':
+        return False
+    try:
+        import winreg
+        with winreg.OpenKey(winreg.HKEY_CURRENT_USER, RUN_KEY) as k:
+            winreg.QueryValueEx(k, RUN_NAME)
+            return True
+    except OSError:
+        return False
+
+
+def set_autostart(on):
+    import winreg
+    with winreg.OpenKey(winreg.HKEY_CURRENT_USER, RUN_KEY, 0, winreg.KEY_SET_VALUE) as k:
+        if on:
+            winreg.SetValueEx(k, RUN_NAME, 0, winreg.REG_SZ, exe_command())
+        else:
+            try:
+                winreg.DeleteValue(k, RUN_NAME)
+            except OSError:
+                pass
+
+
+def notify(title, body):
+    if tray is not None:
+        try:
+            tray.notify(body or ' ', title)
+            return
+        except Exception:
+            pass
+    if os.name == 'nt':
+        ctypes.windll.user32.MessageBeep(0x40)
+
+
+def show_window():
+    def run():
+        try:
+            window.show()
+            window.restore()
+        except Exception:
+            pass
+    threading.Thread(target=run, daemon=True).start()
+
+
+def tray_enabled():
+    bg = (read_json(PREFS_FILE, {}) or {}).get('sg_bg') or {}
+    return bg.get('tray', True)
+
+
+def on_closing():
+    """Closing the window hides it to the tray unless the user turned that
+    off or chose 結束. Must not touch the window from this thread (the GUI
+    thread is waiting for us), hence the helper thread."""
+    global hint_shown
+    if quitting or tray is None or os.environ.get('SG_SELFTEST') or not tray_enabled():
+        return True
+
+    def hide():
+        time.sleep(0.05)
+        try:
+            window.hide()
+        except Exception:
+            pass
+    threading.Thread(target=hide, daemon=True).start()
+    if not hint_shown:
+        hint_shown = True
+        notify(APP_NAME, '仍在背景執行，會繼續同步並提醒新報修。要開啟請點右下角圖示；要結束請在圖示上按右鍵 →「結束」。')
+    return False
+
+
+def quit_app():
+    global quitting
+    quitting = True
+    try:
+        if tray is not None:
+            tray.stop()
+    except Exception:
+        pass
+    try:
+        window.destroy()
+    except Exception:
+        pass
+
+
+def start_tray():
+    """System-tray icon (pystray) with 開啟／立即同步／開機啟動／結束."""
+    global tray
+    try:
+        import pystray
+        from PIL import Image
+    except Exception:
+        return None
+    try:
+        img = Image.open(os.path.join(WEB_DIR, 'icons', 'icon-192.png')).resize((64, 64))
+    except Exception:
+        img = Image.new('RGBA', (64, 64), (13, 148, 136, 255))
+
+    def sync_now(icon, item):
+        def run():
+            try:
+                window.evaluate_js('window.SG && SG.sync && SG.sync.syncNow().catch(function(){})')
+            except Exception:
+                pass
+        threading.Thread(target=run, daemon=True).start()
+
+    def toggle_auto(icon, item):
+        try:
+            set_autostart(not get_autostart())
+        except Exception:
+            pass
+
+    menu = pystray.Menu(
+        pystray.MenuItem('開啟設備管家', lambda icon, item: show_window(), default=True),
+        pystray.MenuItem('立即同步', sync_now),
+        pystray.MenuItem('開機時自動啟動', toggle_auto, checked=lambda item: get_autostart()),
+        pystray.Menu.SEPARATOR,
+        pystray.MenuItem('結束', lambda icon, item: quit_app()),
+    )
+    tray = pystray.Icon('ShebeiGuanjiaPRO', img, APP_NAME, menu)
+    threading.Thread(target=tray.run, daemon=True).start()
+    return tray
 
 
 def centered_geometry(want_w, want_h):
@@ -207,7 +374,7 @@ def selftest(win, seconds):
                                  " desktop: !!(window.SG && SG.desktop), title: document.title})")
     except Exception as e:
         status = 'ERR ' + str(e)
-    print('SELFTEST', status, flush=True)
+    print('SELFTEST', status, 'tray=' + str(tray is not None), flush=True)
     try:
         print('GEOMETRY', win.x, win.y, win.width, win.height, centered_geometry(1320, 860), flush=True)
     except Exception as e:
@@ -224,15 +391,31 @@ def main():
     server.daemon_threads = True
     threading.Thread(target=server.serve_forever, daemon=True).start()
     url = f'http://127.0.0.1:{server.server_address[1]}/index.html?desktop=1&t={TOKEN}'
+    try:
+        write_atomic(INSTANCE_FILE, json.dumps({'port': server.server_address[1], 'token': TOKEN, 'pid': os.getpid()}))
+    except OSError:
+        pass
     width, height, x, y = centered_geometry(1320, 860)
-    kw = dict(width=width, height=height, x=x, y=y, min_size=(380, 560), text_select=True)
+    start_hidden = '--tray' in sys.argv
+    kw = dict(width=width, height=height, x=x, y=y, min_size=(380, 560), text_select=True, hidden=start_hidden)
     if os.environ.get('SG_OFFSCREEN'):
         kw.update(x=-4000, y=-4000)
     window = webview.create_window(APP_NAME, url, **kw)
+    window.events.closing += on_closing
+    start_tray()
     st = os.environ.get('SG_SELFTEST')
     # Private mode: data lives in DATA_FILE/PREFS_FILE, and a fresh browser
     # profile avoids "resource in use" errors when the app is reopened quickly.
     webview.start(selftest if st else None, (window, float(st)) if st else None, private_mode=True)
+    try:
+        if tray is not None:
+            tray.stop()
+    except Exception:
+        pass
+    try:
+        os.remove(INSTANCE_FILE)
+    except OSError:
+        pass
     server.shutdown()
 
 

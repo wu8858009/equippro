@@ -33,6 +33,10 @@
         dataPath: j.path,
         prefs: j.prefs || {},
         save(text) { pending = text; flush(); },
+        async api(path, body) {
+          const r = await fetch(path, body === undefined ? { cache: 'no-store' } : { method: 'POST', body: JSON.stringify(body) });
+          return r.json();
+        },
         setPref(k, v) {
           if (v == null) delete this.prefs[k]; else this.prefs[k] = v;
           fetch('/api/prefs', { method: 'POST', body: JSON.stringify(this.prefs) }).catch(() => {});
@@ -321,6 +325,11 @@
     if (!location.hash || location.hash === '#' || location.hash === '#/') location.hash = '#/dash';
     UI.render();
     SG.sync.start();
+    // Background notifications: catch up now, and keep Android's periodic check registered.
+    setTimeout(() => {
+      SG.notify.check().catch(() => {});
+      if (!SG.desktop && SG.notify.prefs().notify && SG.notify.permission() === 'granted') SG.notify.registerPeriodic();
+    }, 1500);
     DB.onChange((c) => { if (c === 'users') { Auth.refresh(); } if (c === 'settings') shell.refresh(); shell.counts(); rerender(); });
   }
 
