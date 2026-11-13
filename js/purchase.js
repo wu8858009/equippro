@@ -10,15 +10,25 @@
   const PAY_METHODS = ['現金', '匯款', '支票'];
   const PAY_UNITS = ['門市費用', '年度費用', '總公司'];
 
+  // Invoice headers printed on the company's paper form (left column first three, right column the rest).
+  const DEFAULT_INVOICES = [
+    { name: '水灣企業(股)公司', taxId: '80424629' },
+    { name: '榕堤水灣餐廳', taxId: '09878206' },
+    { name: '水灣企業(股)公司新店分公司', taxId: '54736598' },
+    { name: '榕堤水灣店', taxId: '87477121' },
+    { name: '峇里水灣有限公司', taxId: '53690481' }
+  ];
+
   // Settings for the form (stored with the other organisation settings).
+  // Until someone saves their own list, the paper form's defaults are used.
   SG.prSettings = function () {
     const s = DB.get('settings', 'org') || {};
     return {
-      prefix: s.prPrefix || '',
+      prefix: s.prPrefix != null ? s.prPrefix : '水灣',
       unit: s.prUnit || DB.settings().orgName,
       logo: s.prLogo || '',
-      invoices: Array.isArray(s.prInvoices) ? s.prInvoices : [],
-      version: s.prVersion || ''
+      invoices: Array.isArray(s.prInvoices) && s.prInvoices.length ? s.prInvoices : DEFAULT_INVOICES,
+      version: s.prVersion != null ? s.prVersion : '20210321 第三版'
     };
   };
   SG.parseInvoices = (text) => String(text || '').split(/\n+/).map((l) => l.trim()).filter(Boolean).map((l) => {
@@ -130,7 +140,7 @@
       purpose: lastRepair ? `${lastRepair.title}${lastRepair.desc ? '：' + lastRepair.desc : ''}` : (eq ? `${eq.name}更換` : ''),
       delivery: '', contact: v.contact || q.contact || '',
       applicant: Auth.current.name, handler: '', opinion: '', comment: ''
-    }, prev);
+    }, SG.store.get('sg_pr_last') || {}, prev); // last used payment unit / invoice header carry over
     const fields = [
       { type: 'section', label: '表頭' },
       { name: 'no', label: '請購字號（第＿號）', placeholder: '可留空' },
@@ -162,6 +172,7 @@
       extraActions: [{ label: '預覽', onClick: (api) => { const pr = UI.readForm(api.body, fields); preview(q, pr); return false; } }],
       onSave(pr) {
         DB.put('quotes', Object.assign({}, q, { pr }), { quiet: true });
+        SG.store.set('sg_pr_last', { payUnit: pr.payUnit, payStore: pr.payStore, invoice: pr.invoice, invoiceOther: pr.invoiceOther, payMethod: pr.payMethod });
         SG.log('列印請購單', `${q.item}／${q.vendor}`);
         print(q, pr);
       }
