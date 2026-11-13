@@ -236,23 +236,69 @@
       const base = emptyDb();
       if (d) COLLECTIONS.forEach((c) => (base[c] = d[c] && typeof d[c] === 'object' ? d[c] : {}));
       if (d && d._dirty) base._dirty = d._dirty;
+      // The cloud revision this copy of the data has caught up to. It lives
+      // inside the data (not in a separate setting) so a copy can never claim
+      // to be newer than it is; data from before this existed re-reads the cloud once.
+      base._rev = d && typeof d._rev === 'number' ? d._rev : 0;
       this.data = base;
       this.loaded = true;
+      this.listenOtherTabs();
     },
     serialize() { return JSON.stringify(this.data); },
     _persistSoon: U.debounce(function () { DB.saveNow(); }, 250),
     // Desktop writes right away (its bridge coalesces requests) so closing the
     // window never loses the last change.
     persist() { if (SG.desktop) DB.saveNow(); else DB._persistSoon(); },
+    // Merge records another tab/window of this app saved (newer wins).
+    absorb(stored) {
+      if (!stored || typeof stored !== 'object') return false;
+      let changed = false;
+      COLLECTIONS.forEach((c) => {
+        const src = stored[c] || {};
+        Object.keys(src).forEach((id) => {
+          const r = src[id], cur = this.data[c][id];
+          if (r && (!cur || (r.updatedAt || 0) > (cur.updatedAt || 0))) {
+            this.data[c][id] = r;
+            if (stored._dirty && stored._dirty[c + '/' + id]) this.data._dirty[c + '/' + id] = 1;
+            if (r.updatedAt > this.lastStamp) this.lastStamp = r.updatedAt;
+            changed = true;
+          }
+        });
+      });
+      // Only after taking every newer record of that copy is its revision ours too.
+      if (typeof stored._rev === 'number' && stored._rev > this.data._rev) this.data._rev = stored._rev;
+      return changed;
+    },
+    _saving: Promise.resolve(),
     saveNow() {
-      const s = DB.serialize();
-      if (SG.desktop && SG.desktop.save) return SG.desktop.save(s);
+      if (SG.desktop && SG.desktop.save) return SG.desktop.save(DB.serialize());
       const full = () => SG.ui && SG.ui.toast('儲存空間已滿，請到「設定」匯出備份後清理舊紀錄', 'error');
-      const toLocal = () => { try { localStorage.setItem(DB_KEY, s); } catch (e) { full(); } };
+      const toLocal = () => { try { localStorage.setItem(DB_KEY, DB.serialize()); } catch (e) { full(); } };
       if (!this.useIdb) return toLocal();
-      IDB.set(DB_KEY, s).then(() => {
+      // Read-merge-write, one at a time, so two open tabs never overwrite each other's work.
+      const replacing = DB._replacing;
+      DB._replacing = false;
+      DB._saving = DB._saving.then(async () => {
+        if (!replacing) {
+          try {
+            const raw = await IDB.get(DB_KEY);
+            if (raw && DB.absorb(JSON.parse(raw))) setTimeout(() => DB.changed('*'), 0);
+          } catch (e) { /* unreadable copy: just overwrite */ }
+        }
+        await IDB.set(DB_KEY, DB.serialize());
         if (!DB._movedOut) { DB._movedOut = true; try { localStorage.removeItem(DB_KEY); } catch (e) { /* ignore */ } }
+        try { if (DB._bc) DB._bc.postMessage('saved'); } catch (e) { /* ignore */ }
       }).catch(() => { DB.useIdb = false; toLocal(); });
+      return DB._saving;
+    },
+    listenOtherTabs() {
+      if (SG.desktop || this._bc || !('BroadcastChannel' in window)) return;
+      try {
+        this._bc = new BroadcastChannel('shebei-guanjia-db');
+        this._bc.onmessage = async () => {
+          try { const raw = await IDB.get(DB_KEY); if (raw && DB.absorb(JSON.parse(raw))) DB.changed('*'); } catch (e) { /* ignore */ }
+        };
+      } catch (e) { this._bc = null; }
     },
     stamp() {
       let t = Date.now();
@@ -309,7 +355,9 @@
           if (r && r.id) { base[c][r.id] = r; base._dirty[c + '/' + r.id] = 1; }
         });
       });
+      base._rev = this.data._rev || 0;
       this.data = base;
+      this._replacing = true; // this write replaces the stored copy instead of merging with it
       this.saveNow();
       this.changed('*');
     },
@@ -446,8 +494,8 @@
       const c = this.cfg();
       const sameTarget = c.url === url && c.key === key;
       this.saveCfg({ url, key, rev: sameTarget ? c.rev : 0, enabled: true });
-      // Everything local goes up on the first sync with a new backend.
-      if (!sameTarget) COLLECTIONS.forEach((col) => Object.keys(DB.data[col]).forEach((id) => (DB.data._dirty[col + '/' + id] = 1)));
+      // Everything local goes up (and everything remote comes down) on the first sync with a new backend.
+      if (!sameTarget) { DB.data._rev = 0; COLLECTIONS.forEach((col) => Object.keys(DB.data[col]).forEach((id) => (DB.data._dirty[col + '/' + id] = 1))); }
       DB.saveNow();
       return this.syncNow();
     },
@@ -489,7 +537,8 @@
             bytes += j.length;
             changes.push({ c: col, id, u: rec.updatedAt || 0, d: rec.deleted ? 1 : 0, j });
           }
-          const res = await this.call({ action: 'sync', key: c.key, since: c.rev || 0, changes });
+          // `since` comes from the data itself (DB.data._rev), never from a separate setting.
+          const res = await this.call({ action: 'sync', key: c.key, since: DB.data._rev || 0, changes });
           let touched = new Set();
           (res.rows || []).forEach((row) => {
             let rec;
@@ -502,8 +551,7 @@
             const rec = DB.data[k.slice(0, i)][k.slice(i + 1)];
             if (rec && rec.updatedAt === sent[k]) delete DB.data._dirty[k];
           });
-          c.rev = res.rev;
-          this.saveCfg(Object.assign(this.cfg(), { rev: res.rev }));
+          DB.data._rev = res.rev;
           DB.saveNow();
           if (touched.size) { Auth.refresh(); touched.forEach((t) => DB.changed(t)); }
           pushedAll = !res.more && (Object.keys(DB.data._dirty).length === 0 || changes.length === 0);

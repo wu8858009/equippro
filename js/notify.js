@@ -40,7 +40,7 @@
       if (SG.desktop || !Auth.current) return;
       const c = SG.sync.cfg();
       const s = await this.state();
-      Object.assign(s, { url: c.url, key: c.key, rev: c.rev || 0, enabled: !!(c.enabled && this.prefs().notify && this.permission() === 'granted'), me: Auth.current.id });
+      Object.assign(s, { url: c.url, key: c.key, rev: DB.data._rev || 0, enabled: !!(c.enabled && this.prefs().notify && this.permission() === 'granted'), me: Auth.current.id });
       await this.saveState(s);
     },
 

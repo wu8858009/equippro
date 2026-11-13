@@ -55,3 +55,79 @@
 @media print {
   body.printing #print-area .pr-doc { width: auto; padding: 0; box-shadow: none; }
 }
+
+/* ---------------- type-in version of the form (新增／編輯報價) */
+.pe-modal .modal-wide { max-width: 1000px; }
+.pe-wrap { background: #e5e7eb; border-radius: 12px; padding: 12px; overflow-x: auto; -webkit-overflow-scrolling: touch; }
+.pe-wrap .pr-doc { min-width: 720px; width: 100%; max-width: 206mm; padding: 7mm 7mm 5mm; box-shadow: 0 6px 24px rgba(0, 0, 0, .18); }
+.pr-edit .pe-in, .pr-edit select.pe-in, .pr-edit textarea.pe-in {
+  all: unset; box-sizing: border-box; display: inline-block; width: 100%; min-height: 0 !important;
+  font-family: "DFKai-SB", "標楷體", "BiauKai", "Kaiti TC", "STKaiti", serif !important; font-size: 13pt !important; color: #1a237e;
+  background: rgba(13, 148, 136, .06); border-bottom: 1px dashed rgba(13, 148, 136, .45); border-radius: 3px; padding: 1px 4px; line-height: 1.35;
+}
+.pr-edit .pe-in::placeholder { color: #9aa7b4; font-size: 10.5pt; font-family: "Microsoft JhengHei", sans-serif; }
+.pr-edit .pe-in:focus { background: #fff8d6; border-bottom-color: #0d9488; outline: 2px solid rgba(13, 148, 136, .35); }
+.pr-edit textarea.pe-in { white-space: pre-wrap; resize: none; overflow: hidden; display: block; }
+.pr-edit select.pe-in { width: auto; cursor: pointer; padding-right: 14px; background-image: linear-gradient(45deg, transparent 50%, #1a237e 50%), linear-gradient(135deg, #1a237e 50%, transparent 50%); background-position: right 6px top 55%, right 2px top 55%; background-size: 4px 4px; background-repeat: no-repeat; }
+.pr-edit .pe-n { text-align: right; }
+.pr-edit .pe-c { text-align: center; }
+.pr-edit .pe-no { width: 28mm; text-align: center; }
+.pr-edit .pe-d { width: 13mm; text-align: center; }
+.pr-edit .pe-d2 { width: 9mm; text-align: center; }
+.pr-edit .pe-wide { width: calc(100% - 32mm); }
+.pr-edit .pe-mid { width: 46mm; }
+.pr-edit .pe-short { width: 26mm; }
+.pr-edit .pe-short2 { width: 11mm; }
+.pr-edit .pr-unit .pe-in { width: calc(100% - 26mm); }
+.pr-edit .pe-line td { padding: 0.6mm 1mm; height: auto; min-height: 7mm; }
+.pr-edit .pe-line .pe-in { min-height: 6.2mm !important; }
+.pr-edit .pe-total { vertical-align: top; padding-top: 1.6mm !important; }
+.pr-edit .pe-taxcell { white-space: nowrap; }
+.pr-edit .pr-purpose textarea { margin-top: 1mm; min-height: 9mm !important; }
+.pr-edit .pe-sig { padding: 1mm !important; vertical-align: middle; }
+.pr-edit .pe-sig .pe-in { min-height: 9mm !important; }
+.pr-edit .pe-r { cursor: pointer; margin-right: 4mm; }
+.pr-edit .pe-r input[type=radio] {
+  appearance: none; -webkit-appearance: none; width: 3.8mm; height: 3.8mm; min-height: 0 !important; margin: 0 1.2mm 0 0; padding: 0;
+  border: 1px solid #111; border-radius: 0; background: #fff; flex: none; cursor: pointer; vertical-align: -0.5mm;
+}
+.pr-edit .pe-r input[type=radio]:checked { background: #111; box-shadow: inset 0 0 0 1px #fff; }
+.pr-edit .pe-r input[type=radio]:focus-visible { outline: 2px solid #0d9488; }
+.pr-edit .pr-inv .pe-r { display: flex; align-items: center; margin: .6mm 0; white-space: normal; }
+.pr-edit .pe-payunit .pe-r { display: inline-flex; margin-right: 1mm; }
+.pr-edit .pe-payunit .pe-in { margin-right: 4mm; }
+.pe-meta { margin: 14px 0 0; }
+@media (max-width: 760px) {
+  .pe-wrap { padding: 6px; margin: 0 -6px; }
+  .pe-wrap .pr-doc { min-width: 700px; }
+}
+
+/* phones: the paper form reflows into one column (same fields, same order) */
+@media (max-width: 760px) {
+  .pe-wrap { overflow-x: visible; padding: 6px; margin: 0; }
+  .pe-wrap .pr-doc { min-width: 0; padding: 4mm 3mm; font-size: 11pt; }
+  .pr-edit .pr-sub { flex-direction: column; align-items: flex-start; gap: 2mm; }
+  .pr-edit table, .pr-edit tbody, .pr-edit tr, .pr-edit td, .pr-edit th { display: block; width: 100% !important; }
+  .pr-edit colgroup, .pr-edit .pr-h, .pr-edit .pr-vert { display: none !important; }
+  .pr-edit .pr-t { border: 2px solid #111; margin-top: -2px; }
+  .pr-edit .pr-t td { border: 0; border-bottom: 1px solid #ccc; padding: 1.6mm 2mm; height: auto !important; }
+  .pr-edit .pr-t tr:last-child td:last-child { border-bottom: 0; }
+  .pr-edit .lab { text-align: left; font-weight: 700; padding-bottom: 0 !important; border-bottom: 0 !important; color: #333; }
+  .pr-edit .lab br { display: none; }
+  .pr-edit .pe-line { display: grid !important; grid-template-columns: 1fr 1fr 1fr 1fr; gap: 1mm 2mm; border-bottom: 1px dashed #bbb; padding: 1.5mm 0; }
+  .pr-edit .pe-line td { border: 0 !important; padding: 0 1mm !important; }
+  .pr-edit .pe-line td:first-child { grid-column: 1 / -1; }
+  .pr-edit .pe-line td::before, .pr-edit .pe-line .pe-total::before { content: attr(data-lab); display: block; font-size: 9pt; color: #666; font-family: "Microsoft JhengHei", sans-serif; }
+  .pr-edit .pe-total { text-align: right; padding-top: 0 !important; }
+  .pr-edit .pr-items tr:not(.pe-line):not(.pr-h) { display: flex !important; align-items: center; justify-content: space-between; border-bottom: 1px solid #ccc; }
+  .pr-edit .pr-items tr:not(.pe-line):not(.pr-h) td { width: auto !important; border: 0 !important; }
+  .pr-edit .pr-items tr:not(.pe-line):not(.pr-h) td:empty { display: none; }
+  .pr-edit .pr-items tr:not(.pe-line):not(.pr-h) td.r { text-align: left; }
+  .pr-edit .pe-wide, .pr-edit .pe-mid, .pr-edit .pr-unit .pe-in { width: 100%; }
+  .pr-edit .pr-inv { grid-template-columns: 1fr; }
+  .pr-edit .pe-r { margin: 1mm 4mm 1mm 0; }
+  .pr-edit .pe-payunit .pe-in { width: 100%; margin: 1mm 0 2mm; }
+  .pr-edit .pr-sign tr { display: grid !important; grid-template-columns: auto 1fr; }
+  .pr-edit .pr-sign td { border-bottom: 1px solid #ccc !important; }
+  .pr-edit .pr-sign .lab { padding: 2mm !important; min-width: 22mm; }
+}
