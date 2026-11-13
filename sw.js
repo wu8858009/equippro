@@ -2,10 +2,10 @@
 //  - network first, cached copy when offline
 //  - background check (Periodic Background Sync, Android installed app) for new repairs + daily to-do
 //  - tapping a notification opens the right page
-const V = '1.5.1';
+const V = '1.5.2';
 const CACHE = 'sg-v' + V;
-const CORE = ['./', 'index.html', 'css/style.css', 'css/pro.css', 'js/vendor/qrcode.js', 'js/core.js', 'js/ui.js', 'js/media.js',
-  'js/pages-equipment.js', 'js/pages-more.js', 'js/pages-ops.js', 'js/scanner.js', 'js/notify.js', 'js/app.js', 'manifest.webmanifest',
+const CORE = ['./', 'index.html', 'css/style.css', 'css/pro.css', 'css/purchase.css', 'js/vendor/qrcode.js', 'js/core.js', 'js/ui.js', 'js/media.js',
+  'js/pages-equipment.js', 'js/pages-more.js', 'js/pages-ops.js', 'js/scanner.js', 'js/notify.js', 'js/purchase.js', 'js/app.js', 'manifest.webmanifest',
   'icons/icon-192.png', 'icons/icon-512.png', 'icons/icon-180.png'].map((f) => (/\.(js|css)$/.test(f) ? f + '?v=' + V : f));
 
 self.addEventListener('install', (e) => {

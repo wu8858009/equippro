@@ -1,0 +1,57 @@
+/* 請購單 — mirrors the company's paper form. Used for the on-screen preview
+   and for printing / Save as PDF (A4 portrait). Always black on white. */
+.pr-doc {
+  --pr-line: #111;
+  color: #111; background: #fff; width: 190mm; margin: 0 auto; padding: 4mm 2mm 0;
+  font-family: "PMingLiU", "MingLiU", "新細明體", "Noto Serif TC", "Songti TC", serif; font-size: 10.5pt; line-height: 1.28;
+}
+.pr-doc * { box-sizing: border-box; }
+.pr-top { display: flex; align-items: center; justify-content: center; gap: 8mm; min-height: 12mm; }
+.pr-logo { height: 12mm; max-width: 40mm; object-fit: contain; }
+.pr-title { font-size: 19pt; font-weight: 700; letter-spacing: 4mm; font-family: "Microsoft JhengHei", "PingFang TC", sans-serif; }
+.pr-sub { display: flex; justify-content: space-between; align-items: flex-end; margin: 1mm 1mm 1.2mm; font-size: 10.5pt; }
+.pr-sub u { text-decoration: none; border-bottom: 1px solid var(--pr-line); display: inline-block; min-width: 9mm; text-align: center; padding: 0 1mm; font-family: "DFKai-SB", "標楷體", "BiauKai", "Kaiti TC", serif; font-size: 12.5pt; color: #1a237e; }
+.pr-sub .pr-no { min-width: 22mm; }
+.pr-t { width: 100%; border-collapse: collapse; table-layout: fixed; border: 2px solid var(--pr-line); border-top-width: 0; }
+.pr-doc > .pr-t:first-of-type { border-top-width: 2px; }
+.pr-t td, .pr-t th { border: 1px solid var(--pr-line); padding: 0.9mm 2mm; vertical-align: middle; font-weight: 400; }
+.pr-t .pr-h th { text-align: center; padding: 1.1mm 1mm; }
+.pr-t .c { text-align: center; }
+.pr-t .r { text-align: right; padding-right: 3mm; }
+.pr-t .num { text-align: right; }
+.pr-t .lab { text-align: center; white-space: nowrap; }
+/* handwritten-looking filled values */
+.pr-fill { font-family: "DFKai-SB", "標楷體", "BiauKai", "Kaiti TC", "STKaiti", serif; font-size: 12pt; color: #1a237e; }
+.pr-unit { padding: 1.4mm 2mm !important; font-size: 11pt; }
+.pr-items .pr-line td { height: 6.6mm; border-top-color: transparent; border-bottom-color: transparent; vertical-align: top; }
+.pr-items .pr-line:first-of-type td { border-top-color: var(--pr-line); }
+.pr-items .pr-sum td { border-top: 2px solid var(--pr-line); }
+.pr-items .pr-line:has(+ .pr-sum) td { border-bottom: 2px solid var(--pr-line); }
+.pr-items tr:nth-child(2) td { border-top: 1px solid var(--pr-line); }
+.pr-vert { writing-mode: vertical-rl; text-align: center; letter-spacing: 1.5mm; padding: 1mm !important; }
+.pr-vendor td { height: 6.2mm; }
+.pr-chk { display: inline-flex; align-items: center; gap: 1.2mm; margin-right: 6mm; white-space: nowrap; }
+.pr-box { display: inline-block; width: 3.6mm; height: 3.6mm; border: 1px solid var(--pr-line); vertical-align: -0.4mm; position: relative; flex: none; }
+.pr-box.on { background: #111; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+.pr-line-u { text-decoration: none; border-bottom: 1px solid var(--pr-line); display: inline-block; min-width: 32mm; padding: 0 1mm; }
+.pr-acc { margin-top: 0.6mm; }
+.pr-inv { display: grid; grid-template-columns: 1fr 1fr; gap: 0 4mm; }
+.pr-inv .pr-chk { display: flex; margin: 0.4mm 0; white-space: normal; }
+.pr-purpose { height: 13mm; vertical-align: top !important; }
+.pr-op { height: 12mm; vertical-align: top !important; }
+.pr-op > div { margin-top: 1.5mm; }
+.pr-sign td { height: 12.5mm; }
+.pr-sigcell { text-align: center; }
+.pr-sigcell small { display: block; font-size: 9pt; color: #1a237e; }
+.pr-foot { display: flex; justify-content: space-between; font-size: 9pt; margin: 1.5mm 1mm 0; color: #333; font-family: "Microsoft JhengHei", sans-serif; }
+.pr-foot span { color: #888; }
+
+/* on-screen preview */
+.pr-preview { background: #e5e7eb; padding: 12px; border-radius: 12px; overflow: auto; }
+.pr-preview .pr-doc { box-shadow: 0 6px 24px rgba(0, 0, 0, .18); padding: 8mm 8mm 6mm; width: 206mm; }
+.pr-modal .modal-wide { max-width: 900px; }
+@media (max-width: 760px) { .pr-preview .pr-doc { zoom: .48; } }
+
+@media print {
+  body.printing #print-area .pr-doc { width: auto; padding: 0; box-shadow: none; }
+}

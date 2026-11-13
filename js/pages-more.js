@@ -28,10 +28,11 @@
         const pdf = docs.filter((d) => SG.media.isPdf(d)).length;
         return `<button class="att-btn ${docs.length ? 'has' : ''}" data-qatt="${q.id}" title="報價單、請購單等附件">${docs.length ? `📎 ${docs.length}${pdf ? `<small>PDF ${pdf}</small>` : ''}` : (ed ? '＋ 附件' : '—')}</button>`;
       } },
-      { label: '', render: (q) => ed ? `<button class="icon-btn" data-qedit="${q.id}" title="編輯">✏️</button><button class="icon-btn" data-qdel="${q.id}" title="刪除">🗑️</button>` : '', cls: 'actions' }
+      { label: '', render: (q) => `<button class="btn sm" data-qpr="${q.id}" title="用這家報價開請購單（列印／PDF）">🧾 請購單</button>` + (ed ? `<button class="icon-btn" data-qedit="${q.id}" title="編輯">✏️</button><button class="icon-btn" data-qdel="${q.id}" title="刪除">🗑️</button>` : ''), cls: 'actions' }
     ], { empty: '沒有報價' });
   };
   SG.wireQuoteTable = function (root) {
+    UI.$$('[data-qpr]', root).forEach((b) => (b.onclick = () => SG.purchaseForm(b.dataset.qpr)));
     UI.$$('[data-qatt]', root).forEach((b) => (b.onclick = () => {
       const q = DB.get('quotes', b.dataset.qatt);
       if (!canEdit() && !SG.media.count('quote', q.id)) return;
@@ -87,13 +88,14 @@
         const diff = qParts(highest).incl - qParts(lowest).incl;
         return `<section class="card">
           <div class="card-head"><h2>${esc(name)} <small class="muted">${qs.length} 家報價</small></h2>
-          <span class="btn-row" style="margin:0"><button class="btn sm" data-qprint="${esc(name)}">🖨️ 比價表／PDF</button>${canEdit() ? `<button class="btn sm" data-qadd="${esc(name)}">＋ 報價</button>` : ''}</span></div>
+          <span class="btn-row" style="margin:0"><button class="btn sm primary" data-qpurchase="${esc((qs.find((x) => x.adopted) || lowest).id)}" title="${qs.find((x) => x.adopted) ? '用已採用的廠商' : '用最低價廠商'}">🧾 請購單／PDF</button><button class="btn sm" data-qprint="${esc(name)}">📊 比價表</button>${canEdit() ? `<button class="btn sm" data-qadd="${esc(name)}">＋ 報價</button>` : ''}</span></div>
           ${qs.length > 1 ? `<p class="small muted">最低 <b class="lowest">${U.money(qParts(lowest).incl)}</b>（${esc(lowest.vendor)}），最高與最低相差 ${U.money(diff)}</p>` : ''}
           ${SG.quoteTable(qs, { lowestId: qs.length > 1 ? lowest.id : null })}</section>`;
       }).join('') : UI.empty(all.length ? '找不到符合的報價' : '還沒有報價，按「＋ 新增報價」開始比價', '💰');
       SG.wireQuoteTable(main);
       UI.$$('[data-qadd]', main).forEach((b) => (b.onclick = () => F.quote(null, { item: b.dataset.qadd })));
       UI.$$('[data-qprint]', main).forEach((b) => (b.onclick = () => SG.printQuoteSheet(b.dataset.qprint)));
+      UI.$$('[data-qpurchase]', main).forEach((b) => (b.onclick = () => SG.purchaseForm(b.dataset.qpurchase)));
     };
     UI.$('#q-q', main).addEventListener('input', U.debounce((e) => { quoteSearch = e.target.value.trim(); draw(); }, 150));
     const add = UI.$('#q-add', main); if (add) add.onclick = () => F.quote(null);
@@ -232,7 +234,11 @@
       { name: 'contact', label: '聯絡人' },
       { name: 'phone', label: '電話', type: 'tel' },
       { name: 'mobile', label: '手機', type: 'tel' },
+      { name: 'fax', label: '傳真', type: 'tel' },
       { name: 'email', label: 'Email', type: 'email' },
+      { name: 'bank', label: '匯款銀行', placeholder: '例如：台灣銀行 新店分行（004）' },
+      { name: 'accountName', label: '戶名' },
+      { name: 'accountNo', label: '帳號' },
       { name: 'taxId', label: '統一編號' },
       { name: 'address', label: '地址' },
       { name: 'note', label: '備註', type: 'textarea', span: 2 },
@@ -572,6 +578,19 @@
           </div><div class="btn-row"><button class="btn primary" id="s-connect">連線並同步</button></div>` : '<p class="small">尚未連線雲端，請管理員設定。</p>'}`}
       </section>
       ${SG.notify.settingsHtml()}
+      ${admin ? (() => { const pc = SG.prSettings(); return `<section class="card" id="pr-card">
+        <div class="card-head"><h2>🧾 請購單設定</h2></div>
+        <p class="small muted">列印請購單時使用（報價比價 →「🧾 請購單」）。</p>
+        <div class="form-grid">
+          <div class="field"><label>請購字號前綴（○○請購字第＿號）</label><input id="pr-prefix" value="${esc(pc.prefix)}" placeholder="例如：水灣"></div>
+          <div class="field"><label>預設申請單位</label><input id="pr-unit" value="${esc(pc.unit)}" placeholder="例如：碧水堂"></div>
+          <div class="field span-2"><label>發票抬頭清單（一行一個：公司名稱：統編）</label><textarea id="pr-inv" rows="4" placeholder="水灣企業(股)公司：80424629&#10;水灣企業(股)公司新店分公司：54736598">${esc(pc.invoices.map((x) => x.name + (x.taxId ? '：' + x.taxId : '')).join('\n'))}</textarea></div>
+          <div class="field"><label>表單版次（右下角）</label><input id="pr-ver" value="${esc(pc.version)}" placeholder="例如：20210321 第三版"></div>
+          <div class="field"><label>表頭 Logo</label><div class="pr-logo-set">${pc.logo ? `<img src="${pc.logo}" alt="">` : '<span class="muted small">尚未上傳</span>'}
+            <button class="btn sm" id="pr-logo-btn" type="button">${pc.logo ? '更換' : '上傳'}</button>${pc.logo ? '<button class="btn sm danger-ghost" id="pr-logo-del" type="button">移除</button>' : ''}</div></div>
+        </div>
+        <div class="btn-row"><button class="btn primary" id="pr-save">儲存請購單設定</button></div>
+      </section>`; })() : ''}
       ${admin ? `<section class="card">
         <div class="card-head"><h2>基本設定</h2></div>
         <div class="form-grid">
@@ -600,6 +619,23 @@
     UI.$('#s-theme', main).onchange = (ev) => SG.theme.set(ev.target.value);
     const on = (sel, fn) => { const el = UI.$(sel, main); if (el) el.onclick = fn; };
     on('#s-pw', () => passwordForm(me, true));
+    on('#pr-save', () => {
+      DB.saveSettings({ prPrefix: UI.$('#pr-prefix', main).value.trim(), prUnit: UI.$('#pr-unit', main).value.trim(), prInvoices: SG.parseInvoices(UI.$('#pr-inv', main).value), prVersion: UI.$('#pr-ver', main).value.trim() });
+      SG.log('修改請購單設定', '');
+      UI.toast('請購單設定已儲存');
+      UI.render();
+    });
+    on('#pr-logo-btn', () => {
+      const inp = document.createElement('input');
+      inp.type = 'file'; inp.accept = 'image/*';
+      inp.onchange = async () => {
+        const f = inp.files && inp.files[0]; if (!f) return;
+        try { DB.saveSettings({ prLogo: await U.compressImage(f, 420, 90000) }); UI.toast('Logo 已更新'); UI.render(); }
+        catch (e) { UI.toast(e.message, 'error'); }
+      };
+      inp.click();
+    });
+    on('#pr-logo-del', () => { DB.saveSettings({ prLogo: '' }); UI.render(); });
     SG.notify.wireSettings(main);
     on('#s-logout', () => { SG.log('登出', me.name); DB.saveNow(); Auth.logout(); location.hash = ''; location.reload(); });
     const st = UI.$('#s-sync-state', main);

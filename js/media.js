@@ -247,18 +247,38 @@
 
   // ====================================================== printing
   // Prints `bodyHtml` as a document (use the browser's "Save as PDF" for PDF).
-  SG.print = function (title, bodyHtml, { landscape = false } = {}) {
+  SG.print = function (title, bodyHtml, { landscape = false, bare = false, margin = '12mm' } = {}) {
     let area = UI.$('#print-area');
     if (!area) { area = document.createElement('div'); area.id = 'print-area'; document.body.appendChild(area); }
     const s = DB.settings();
     const store = SG.q.curStore();
-    area.innerHTML = `<style>@page { size: A4 ${landscape ? 'landscape' : 'portrait'}; margin: 12mm; }</style>
+    // The document title becomes the default file name in "Save as PDF".
+    const oldTitle = document.title;
+    document.title = title;
+    window.addEventListener('afterprint', () => { document.title = oldTitle; }, { once: true });
+    setTimeout(() => { document.title = oldTitle; }, 4000);
+    area.innerHTML = bare
+      ? `<style>@page { size: A4 ${landscape ? 'landscape' : 'portrait'}; margin: ${margin}; }</style>${bodyHtml}`
+      : `<style>@page { size: A4 ${landscape ? 'landscape' : 'portrait'}; margin: ${margin}; }</style>
       <div class="print-doc"><div class="pd-head"><div><div class="pd-org">${esc(s.orgName)}${store ? '・' + esc(store) : ''}</div><h1>${esc(title)}</h1></div>
       <div class="pd-date">列印日期 ${U.today()}<br>${esc(Auth.current ? Auth.current.name : '')}</div></div>${bodyHtml}</div>`;
     document.body.classList.add('printing');
-    const done = () => { document.body.classList.remove('printing'); area.innerHTML = ''; window.removeEventListener('afterprint', done); };
+    let finished = false;
+    const done = () => {
+      if (finished) return;
+      finished = true;
+      document.body.classList.remove('printing'); area.innerHTML = '';
+      window.removeEventListener('afterprint', done);
+      ['pointermove', 'keydown', 'touchstart'].forEach((ev) => window.removeEventListener(ev, later));
+    };
+    // afterprint is the normal signal; if a browser never sends it, the first
+    // interaction with the page after the print dialog brings the app back.
+    const later = () => setTimeout(done, 300);
     window.addEventListener('afterprint', done);
-    setTimeout(() => { window.print(); setTimeout(done, 1500); }, 80);
+    setTimeout(() => {
+      window.print();
+      setTimeout(() => ['pointermove', 'keydown', 'touchstart'].forEach((ev) => window.addEventListener(ev, later, { once: true })), 800);
+    }, 80);
   };
   // Plain table for print documents.
   SG.printTable = (head, rows, { numCols = [] } = {}) => `<table class="pd-table"><thead><tr>${head.map((h, i) => `<th class="${numCols.includes(i) ? 'num' : ''}">${esc(h)}</th>`).join('')}</tr></thead>
