@@ -281,3 +281,31 @@ a.me:hover { background: rgba(255, 255, 255, .06); }
 
 .bg-tips { margin: 12px 0 0; padding-left: 18px; display: grid; gap: 6px; }
 #bg-card .check + .check { margin-top: 8px; }
+
+/* ---------------- PDF attachments */
+.g-pdf { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 6px; background: linear-gradient(160deg, #fff5f5, #ffe4e6); cursor: pointer; padding: 8px; }
+.pdf-ico { display: grid; place-items: center; width: 46px; height: 54px; border-radius: 6px 14px 6px 6px; background: linear-gradient(160deg, #f87171, #dc2626); color: #fff; font-size: 13px; font-weight: 900; letter-spacing: .5px; box-shadow: 0 6px 14px -4px rgba(220, 38, 38, .55); }
+.g-pdf em { font-style: normal; font-size: 11px; color: #7f1d1d; max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.g-pdf span { top: 5px; bottom: auto; }
+#ph-stage { width: 100%; display: grid; place-items: center; }
+#ph-stage img { max-width: 100%; max-height: 68vh; display: block; }
+.pdf-frame { width: 100%; height: 68vh; border: 0; background: #fff; border-radius: 10px; }
+.pdf-cap { color: #cbd5e1; font-size: 13px; margin: 8px 0 4px; text-align: center; }
+.ph-modal .modal-wide { max-width: 1000px; }
+.att-btn { border: 1px dashed var(--line); background: none; color: var(--muted); border-radius: 10px; padding: 4px 10px; font: inherit; font-size: 13px; cursor: pointer; white-space: nowrap; }
+.att-btn.has { border-style: solid; border-color: var(--accent-2); color: var(--accent); background: var(--accent-soft); font-weight: 700; }
+.att-btn small { margin-left: 6px; font-size: 10px; background: #dc2626; color: #fff; border-radius: 4px; padding: 0 4px; font-weight: 800; }
+.att-btn:hover { border-color: var(--accent); color: var(--accent); }
+@media print {
+  .pd-table td { white-space: pre-line; }
+  .pd-sign { display: grid; grid-template-columns: repeat(4, 1fr); margin-top: 18px; border: 1px solid #999; }
+  .pd-sign div { border-right: 1px solid #999; padding: 4px 8px 38px; font-size: 10pt; }
+  .pd-sign div:last-child { border-right: 0; }
+  .pd-photos { display: grid; grid-template-columns: repeat(2, 1fr); gap: 8px; }
+  .pd-photos figure { margin: 0; break-inside: avoid; }
+  .pd-photos img { width: 100%; max-height: 120mm; object-fit: contain; border: 1px solid #ccc; }
+  .pd-photos figcaption { font-size: 9pt; color: #444; }
+}
+.pdf-card { display: flex; flex-direction: column; align-items: center; gap: 10px; padding: 34px 16px; color: #e2e8f0; text-align: center; }
+.pdf-ico.big { width: 76px; height: 90px; font-size: 20px; border-radius: 8px 22px 8px 8px; }
+.pdf-name { font-weight: 700; word-break: break-all; }

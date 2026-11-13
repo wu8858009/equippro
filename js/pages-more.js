@@ -23,12 +23,47 @@
       { label: '含稅價', render: (q) => { const t = qParts(q); return `<b class="${q.id === lowestId ? 'lowest' : ''}">${U.money(t.incl)}</b><div class="muted small">稅 ${t.rate}%：${U.money(t.tax)}</div>`; }, cls: 'num' },
       { label: '狀態', render: (q) => [q.id === lowestId ? UI.badge('最低價', 'b-green') : '', q.adopted ? UI.badge('已採用', 'b-blue') : '', q.validUntil && q.validUntil < today ? UI.badge('已過期', 'b-gray') : ''].join(' ') },
       { label: '備註', render: (q) => `<span class="small">${esc(q.note || '')}</span>` },
+      { label: '附件', render: (q) => {
+        const docs = SG.media.list('quote', q.id);
+        const pdf = docs.filter((d) => SG.media.isPdf(d)).length;
+        return `<button class="att-btn ${docs.length ? 'has' : ''}" data-qatt="${q.id}" title="報價單、請購單等附件">${docs.length ? `📎 ${docs.length}${pdf ? `<small>PDF ${pdf}</small>` : ''}` : (ed ? '＋ 附件' : '—')}</button>`;
+      } },
       { label: '', render: (q) => ed ? `<button class="icon-btn" data-qedit="${q.id}" title="編輯">✏️</button><button class="icon-btn" data-qdel="${q.id}" title="刪除">🗑️</button>` : '', cls: 'actions' }
     ], { empty: '沒有報價' });
   };
   SG.wireQuoteTable = function (root) {
+    UI.$$('[data-qatt]', root).forEach((b) => (b.onclick = () => {
+      const q = DB.get('quotes', b.dataset.qatt);
+      if (!canEdit() && !SG.media.count('quote', q.id)) return;
+      SG.media.manage('quote', q.id, `${q.item}／${q.vendor}`);
+    }));
     UI.$$('[data-qedit]', root).forEach((b) => (b.onclick = () => F.quote(DB.get('quotes', b.dataset.qedit))));
-    UI.$$('[data-qdel]', root).forEach((b) => (b.onclick = async () => { const q = DB.get('quotes', b.dataset.qdel); if (await F.remove('quotes', q, `${q.item}／${q.vendor}`)) UI.render(); }));
+    UI.$$('[data-qdel]', root).forEach((b) => (b.onclick = async () => { const q = DB.get('quotes', b.dataset.qdel); if (await F.remove('quotes', q, `${q.item}／${q.vendor}`)) { SG.media.removeFor('quote', q.id); UI.render(); } }));
+  };
+
+  // Printable comparison sheet for one item (use "Save as PDF" in the print dialog).
+  SG.printQuoteSheet = function (name) {
+    const qs = DB.all('quotes').filter((q) => q.item === name).sort((a, b) => qParts(a).incl - qParts(b).incl);
+    if (!qs.length) return;
+    const lowest = qs[0];
+    const adopted = qs.find((q) => q.adopted);
+    const rows = qs.map((q, i) => {
+      const t = qParts(q);
+      const docs = SG.media.list('quote', q.id);
+      return [String(i + 1), q.vendor + (q.contact ? `\n${q.contact}` : ''), q.date || '', q.validUntil || '', U.money(t.excl), U.money(t.tax), { html: `<b>${U.money(t.incl)}</b>` },
+        [q.id === lowest.id && qs.length > 1 ? '最低價' : '', q.adopted ? '已採用' : ''].filter(Boolean).join('、'),
+        [q.note, docs.length ? `附件 ${docs.length}（${docs.map((d) => d.kind).join('、')}）` : ''].filter(Boolean).join('\n')];
+    });
+    const eq = qs.map((q) => q.equipmentId).filter(Boolean).map((id) => DB.get('equipment', id)).find(Boolean);
+    const photos = qs.flatMap((q) => SG.media.list('quote', q.id).filter((d) => !SG.media.isPdf(d)).map((d) => ({ d, q })));
+    SG.print('報價比價表', `
+      <table class="pd-kv" style="margin-bottom:8px"><tr><th>報價項目</th><td>${esc(name)}</td></tr>
+        ${eq ? `<tr><th>相關設備</th><td>${esc((eq.code || '') + ' ' + eq.name)}${eq.location ? '（' + esc(eq.location) + '）' : ''}</td></tr>` : ''}
+        <tr><th>報價家數</th><td>${qs.length} 家${qs.length > 1 ? `，最低 ${U.money(qParts(lowest).incl)}（${esc(lowest.vendor)}），最高與最低相差 ${U.money(qParts(qs[qs.length - 1]).incl - qParts(lowest).incl)}` : ''}</td></tr>
+        ${adopted ? `<tr><th>採用廠商</th><td><b>${esc(adopted.vendor)}</b>　${U.money(qParts(adopted).incl)}（含稅）</td></tr>` : ''}</table>
+      ${SG.printTable(['#', '廠商', '報價日', '有效期限', '未稅價', '稅額', '含稅價', '狀態', '備註／附件'], rows, { numCols: [4, 5, 6] })}
+      <div class="pd-sign"><div>經辦</div><div>店經理</div><div>督導</div><div>核准</div></div>
+      ${photos.length ? `<h2>附件影像</h2><div class="pd-photos">${photos.map(({ d, q }) => `<figure><img src="${d.data}" alt=""><figcaption>${esc(q.vendor)}・${esc(d.kind || '')}</figcaption></figure>`).join('')}</div>` : ''}`);
   };
 
   let quoteSearch = '';
@@ -52,12 +87,13 @@
         const diff = qParts(highest).incl - qParts(lowest).incl;
         return `<section class="card">
           <div class="card-head"><h2>${esc(name)} <small class="muted">${qs.length} 家報價</small></h2>
-          ${canEdit() ? `<button class="btn sm" data-qadd="${esc(name)}">＋ 報價</button>` : ''}</div>
+          <span class="btn-row" style="margin:0"><button class="btn sm" data-qprint="${esc(name)}">🖨️ 比價表／PDF</button>${canEdit() ? `<button class="btn sm" data-qadd="${esc(name)}">＋ 報價</button>` : ''}</span></div>
           ${qs.length > 1 ? `<p class="small muted">最低 <b class="lowest">${U.money(qParts(lowest).incl)}</b>（${esc(lowest.vendor)}），最高與最低相差 ${U.money(diff)}</p>` : ''}
           ${SG.quoteTable(qs, { lowestId: qs.length > 1 ? lowest.id : null })}</section>`;
       }).join('') : UI.empty(all.length ? '找不到符合的報價' : '還沒有報價，按「＋ 新增報價」開始比價', '💰');
       SG.wireQuoteTable(main);
       UI.$$('[data-qadd]', main).forEach((b) => (b.onclick = () => F.quote(null, { item: b.dataset.qadd })));
+      UI.$$('[data-qprint]', main).forEach((b) => (b.onclick = () => SG.printQuoteSheet(b.dataset.qprint)));
     };
     UI.$('#q-q', main).addEventListener('input', U.debounce((e) => { quoteSearch = e.target.value.trim(); draw(); }, 150));
     const add = UI.$('#q-add', main); if (add) add.onclick = () => F.quote(null);

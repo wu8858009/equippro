@@ -153,6 +153,22 @@ class Handler(SimpleHTTPRequestHandler):
                 return self._json({'ok': True, 'on': get_autostart()})
             if path == '/api/bg':
                 return self._json({'ok': True})  # tray preference lives in prefs.json (read at close time)
+            if path == '/api/openfile':
+                q = urllib.parse.parse_qs(urllib.parse.urlparse(self.path).query)
+                name = os.path.basename((q.get('name') or ['file.pdf'])[0]) or 'file.pdf'
+                name = ''.join(c for c in name if c not in '<>:"/\\|?*') or 'file.pdf'
+                text = self._body()
+                if not (text.startswith('data:') and ';base64,' in text[:80]):
+                    return self._json({'ok': False, 'error': '檔案格式錯誤'})
+                folder = os.path.join(os.environ.get('TEMP') or DATA_DIR, 'ShebeiGuanjia')
+                os.makedirs(folder, exist_ok=True)
+                target = os.path.join(folder, name)
+                with open(target, 'wb') as f:
+                    f.write(base64.b64decode(text.split(',', 1)[1]))
+                if os.environ.get('SG_SELFTEST') or os.environ.get('SG_NO_OPEN'):
+                    return self._json({'ok': True, 'path': target, 'opened': False})
+                os.startfile(target)  # default program (PDF reader / photo viewer)
+                return self._json({'ok': True, 'path': target})
             if path == '/api/show':
                 show_window()
                 return self._json({'ok': True})
@@ -162,6 +178,7 @@ class Handler(SimpleHTTPRequestHandler):
                 text = self._body()
                 ext = os.path.splitext(name)[1].lower()
                 types = {'.csv': ('CSV 檔 (*.csv)', '所有檔案 (*.*)'), '.jpg': ('JPEG 圖片 (*.jpg)', '所有檔案 (*.*)'),
+                         '.pdf': ('PDF 文件 (*.pdf)', '所有檔案 (*.*)'),
                          '.xlsx': ('Excel 活頁簿 (*.xlsx)', '所有檔案 (*.*)')}.get(
                     ext, ('JSON 檔 (*.json)', '所有檔案 (*.*)'))
                 res = window.create_file_dialog(webview.FileDialog.SAVE, directory=os.path.join(os.path.expanduser('~'), 'Documents'),

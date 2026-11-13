@@ -33,6 +33,14 @@
         dataPath: j.path,
         prefs: j.prefs || {},
         save(text) { pending = text; flush(); },
+        // Opens a file (e.g. a PDF attachment) with the default Windows program.
+        async openFile(name, dataUrl) {
+          try {
+            const res = await fetch('/api/openfile?name=' + encodeURIComponent(name), { method: 'POST', body: dataUrl });
+            const k = await res.json();
+            if (!k.ok) UI.toast(k.error || '無法開啟檔案', 'error');
+          } catch (e) { UI.toast('無法開啟檔案', 'error'); }
+        },
         async api(path, body) {
           const r = await fetch(path, body === undefined ? { cache: 'no-store' } : { method: 'POST', body: JSON.stringify(body) });
           return r.json();
